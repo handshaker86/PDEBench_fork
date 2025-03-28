@@ -50,6 +50,8 @@ def run_training(
     t_min,
     t_max,
     base_path="../data/",
+    model_save_path="models/",
+    result_save_path="results/",
     training_type="autoregressive",
 ):
     msg = f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
@@ -62,6 +64,7 @@ def run_training(
     if single_file:
         # filename
         model_name = flnm[:-5] + "_Unet"
+        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
 
         # Initialize the dataset and dataloader
         train_data = UNetDatasetSingle(
@@ -85,6 +88,7 @@ def run_training(
     else:
         # filename
         model_name = flnm + "_Unet"
+        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
 
         train_data = UNetDatasetMult(
             flnm,
@@ -149,7 +153,7 @@ def run_training(
         else:
             model_name = model_name + "-1-step"
 
-    model_path = model_name + ".pt"
+    model_path = model_save_path + "/Unet/" + model_name + ".pt"
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     msg = f"Total parameters = {total_params}"
@@ -190,6 +194,7 @@ def run_training(
             t_max,
             mode="Unet",
             initial_step=initial_step,
+            result_save_path=result_save_path,
         )
         pickle.dump(errs, Path.open(model_name + ".pickle", "wb"))
 

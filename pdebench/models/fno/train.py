@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import pickle
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from pdebench.models.fno.utils import FNODatasetMult, FNODatasetSingle
 from pdebench.models.metrics import metrics
 from torch import nn
 
+
+logger = logging.getLogger(__name__)
 # torch.manual_seed(0)
 # np.random.seed(0)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -44,11 +47,12 @@ def run_training(
     t_min,
     t_max,
     base_path="../data/",
+    model_save_path="models/",
+    result_save_path="results/",
     training_type="autoregressive",
 ):
-    # print(
-    #    f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
-    # )
+    msg = f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
+    logger.info(msg)
 
     ################################################################
     # load data
@@ -57,6 +61,7 @@ def run_training(
     if single_file:
         # filename
         model_name = flnm[:-5] + "_FNO"
+        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
         # print("FNODatasetSingle")
 
         # Initialize the dataset and dataloader
@@ -81,6 +86,7 @@ def run_training(
     else:
         # filename
         model_name = flnm + "_FNO"
+        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
 
         # print("FNODatasetMult")
         train_data = FNODatasetMult(
@@ -135,10 +141,11 @@ def run_training(
     # Set maximum time step of the data to train
     t_train = min(t_train, _data.shape[-2])
 
-    model_path = model_name + ".pt"
+    model_path = model_save_path + "/FNO/" + model_name + ".pt"
 
-    # total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    # print(f"Total parameters = {total_params}")
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    msg = f"Total parameters = {total_params}"
+    logger.info(msg)
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-4
@@ -174,6 +181,7 @@ def run_training(
             t_min,
             t_max,
             initial_step=initial_step,
+            result_save_path=result_save_path,
         )
         with Path(model_name + ".pickle").open("wb") as pb:
             pickle.dump(errs, pb)
@@ -297,7 +305,9 @@ def run_training(
 
                             pred = torch.cat((pred, im), -2)
 
-                            xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                            xx = torch.cat(
+                                (xx[..., 1:, :], im), dim=-2
+                            )  # noqa: PLW2901
 
                         val_l2_step += loss.item()
                         _batch = yy.size(0)
