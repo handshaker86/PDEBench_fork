@@ -149,6 +149,7 @@ from __future__ import annotations
 
 import logging
 import math as mt
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -323,10 +324,12 @@ def metrics(
     t_max,
     mode="FNO",
     initial_step=None,
+    result_save_path=None,
 ):
     if mode == "Unet":
         with torch.no_grad():
             for itot, (xx, yy) in enumerate(val_loader):
+                start_time = time.time()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
 
@@ -335,18 +338,23 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                for _t in range(initial_step, yy.shape[-2]):
+                for t in range(initial_step, yy.shape[-2]):
                     inp = xx.reshape(inp_shape)
                     temp_shape = [0, -1]
                     temp_shape.extend(list(range(1, len(inp.shape) - 1)))
                     inp = inp.permute(temp_shape)
+
+                    y = yy[..., t : t + 1, :]
 
                     temp_shape = [0]
                     temp_shape.extend(list(range(2, len(inp.shape))))
                     temp_shape.append(1)
                     im = model(inp).permute(temp_shape).unsqueeze(-2)
                     pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                    xx = torch.cat((xx[..., 1:, :], y), dim=-2)  # noqa: PLW2901
+
+                end_time = time.time()
+                prediction_time = end_time - start_time
 
                 (
                     _err_RMSE,
@@ -356,14 +364,14 @@ def metrics(
                     _err_BD,
                     _err_F,
                 ) = metric_func(
-                    pred,
-                    yy,
+                    pred[..., initial_step:, :],
+                    yy[..., initial_step:, :],
                     if_mean=True,
                     Lx=Lx,
                     Ly=Ly,
                     Lz=Lz,
                     initial_step=initial_step,
-                )
+                )  # only calculate the metrics for the prediction part
 
                 if itot == 0:
                     err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
@@ -374,6 +382,7 @@ def metrics(
                         _err_BD,
                         _err_F,
                     )
+                    total_time = prediction_time
                     pred_plot = pred[:1]
                     target_plot = yy[:1]
                     val_l2_time = torch.zeros(yy.shape[-2]).to(device)
@@ -384,6 +393,8 @@ def metrics(
                     err_Max += _err_Max
                     err_BD += _err_BD
                     err_F += _err_F
+
+                    total_time += prediction_time
 
                     mean_dim = list(range(len(yy.shape) - 2))
                     mean_dim.append(-1)
@@ -396,6 +407,7 @@ def metrics(
         with torch.no_grad():
             itot = 0
             for itot, (xx, yy, grid) in enumerate(val_loader):
+                start_time = time.time()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
                 grid = grid.to(device)  # noqa: PLW2901
@@ -405,12 +417,15 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                for _t in range(initial_step, yy.shape[-2]):
+                for t in range(initial_step, yy.shape[-2]):
+                    y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
                     im = model(inp, grid)
                     pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                    xx = torch.cat((xx[..., 1:, :], y), dim=-2)  # noqa: PLW2901
 
+                end_time = time.time()
+                prediction_time = end_time - start_time
                 (
                     _err_RMSE,
                     _err_nRMSE,
@@ -419,14 +434,14 @@ def metrics(
                     _err_BD,
                     _err_F,
                 ) = metric_func(
-                    pred,
-                    yy,
+                    pred[..., initial_step:, :],
+                    yy[..., initial_step:, :],
                     if_mean=True,
                     Lx=Lx,
                     Ly=Ly,
                     Lz=Lz,
                     initial_step=initial_step,
-                )
+                )  # only calculate the metrics for the prediction part
                 if itot == 0:
                     err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
                         _err_RMSE,
@@ -439,6 +454,7 @@ def metrics(
                     pred_plot = pred[:1]
                     target_plot = yy[:1]
                     val_l2_time = torch.zeros(yy.shape[-2]).to(device)
+                    total_time = prediction_time
                 else:
                     err_RMSE += _err_RMSE
                     err_nRMSE += _err_nRMSE
@@ -446,6 +462,8 @@ def metrics(
                     err_Max += _err_Max
                     err_BD += _err_BD
                     err_F += _err_F
+
+                    total_time += prediction_time
 
                     mean_dim = list(range(len(yy.shape) - 2))
                     mean_dim.append(-1)
@@ -463,14 +481,30 @@ def metrics(
     err_Max = np.array(err_Max.data.cpu() / itot)
     err_BD = np.array(err_BD.data.cpu() / itot)
     err_F = np.array(err_F.data.cpu() / itot)
+    prediction_time = total_time / itot
     logger.info(f"RMSE: {err_RMSE:.5f}")
     logger.info(f"normalized RMSE: {err_nRMSE:.5f}")
     logger.info(f"RMSE of conserved variables: {err_CSV:.5f}")
     logger.info(f"Maximum value of rms error: {err_Max:.5f}")
     logger.info(f"RMSE at boundaries: {err_BD:.5f}")
     logger.info(f"RMSE in Fourier space: {err_F}")
+    logger.info(f"Prediction time: {prediction_time:.5f}")
 
     val_l2_time = val_l2_time / itot
+
+    # save the metrics and prediction time
+    with open(result_save_path + "loss.txt", "w") as f:
+        f.write(
+            f"RMSE: {err_RMSE:.5f}, normalized RMSE: {err_nRMSE:.5f}, "
+            f"RMSE of conserved variables: {err_CSV:.5f}, "
+            f"Maximum value of rms error: {err_Max:.5f}, "
+            f"RMSE at boundaries: {err_BD:.5f}, "
+            f"RMSE in Fourier space: {err_F}, "
+            f"Prediction time: {prediction_time:.5f}\n"
+        )
+
+    with open(result_save_path + "predict_time.txt", "w") as f:
+        f.write(f"{prediction_time:.5f}\n")
 
     if plot:
         dim = len(yy.shape) - 3
