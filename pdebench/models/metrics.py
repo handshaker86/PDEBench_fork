@@ -150,6 +150,7 @@ from __future__ import annotations
 import logging
 import math as mt
 import time
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -351,9 +352,10 @@ def metrics(
                     temp_shape.append(1)
                     im = model(inp).permute(temp_shape).unsqueeze(-2)
                     pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], y), dim=-2)  # noqa: PLW2901
+                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
 
                 end_time = time.time()
+                num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
 
                 (
@@ -425,6 +427,7 @@ def metrics(
                     xx = torch.cat((xx[..., 1:, :], y), dim=-2)  # noqa: PLW2901
 
                 end_time = time.time()
+                num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
                 (
                     _err_RMSE,
@@ -481,30 +484,34 @@ def metrics(
     err_Max = np.array(err_Max.data.cpu() / itot)
     err_BD = np.array(err_BD.data.cpu() / itot)
     err_F = np.array(err_F.data.cpu() / itot)
-    prediction_time = total_time / itot
+    batch_prediction_time = total_time / itot
+    frame_prediction_time = batch_prediction_time / num_frames
+
     logger.info(f"RMSE: {err_RMSE:.5f}")
     logger.info(f"normalized RMSE: {err_nRMSE:.5f}")
     logger.info(f"RMSE of conserved variables: {err_CSV:.5f}")
     logger.info(f"Maximum value of rms error: {err_Max:.5f}")
     logger.info(f"RMSE at boundaries: {err_BD:.5f}")
     logger.info(f"RMSE in Fourier space: {err_F}")
-    logger.info(f"Prediction time: {prediction_time:.5f}")
+    logger.info(f"Prediction time: {batch_prediction_time:.5f}")
 
     val_l2_time = val_l2_time / itot
 
     # save the metrics and prediction time
+    os.makedirs(result_save_path, exist_ok=True)
     with open(result_save_path + "loss.txt", "w") as f:
         f.write(
-            f"RMSE: {err_RMSE:.5f}, normalized RMSE: {err_nRMSE:.5f}, "
-            f"RMSE of conserved variables: {err_CSV:.5f}, "
-            f"Maximum value of rms error: {err_Max:.5f}, "
-            f"RMSE at boundaries: {err_BD:.5f}, "
-            f"RMSE in Fourier space: {err_F}, "
-            f"Prediction time: {prediction_time:.5f}\n"
+            f"RMSE: {err_RMSE:.5f}\n"
+            f"normalized RMSE: {err_nRMSE:.5f}\n"
+            f"RMSE of conserved variables: {err_CSV:.5f}\n"
+            f"Maximum value of rms error: {err_Max:.5f}\n"
+            f"RMSE at boundaries: {err_BD:.5f}\n"
+            f"RMSE in Fourier space: {err_F}\n"
         )
 
     with open(result_save_path + "predict_time.txt", "w") as f:
-        f.write(f"{prediction_time:.5f}\n")
+        f.write(f"prediction time for each batch: {batch_prediction_time:.5f}\n")
+        f.write(f"prediction time for each frame: {frame_prediction_time:.5f}\n")
 
     if plot:
         dim = len(yy.shape) - 3
