@@ -9,12 +9,12 @@ hydra:
     dir: .
 
 args:
-  model_name: "FNO"
-  if_training: False
+  model_name: "Unet"
+  if_training: True
   continue_training: False
   num_workers: 2
   batch_size: 5
-  initial_step: 10
+  initial_step: 1
   t_train: 101
   model_update: 10
   filename: "2D_diff-react_NA_NA"
@@ -26,6 +26,8 @@ args:
   learning_rate: 1.e-3
   scheduler_step: 100
   scheduler_gamma: 0.5
+  model_save_path: "models/"
+  result_save_path : "results/"
   #Unet
   in_channels: 2
   out_channels: 2
