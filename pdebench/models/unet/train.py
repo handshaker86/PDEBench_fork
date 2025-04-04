@@ -55,8 +55,7 @@ def run_training(
     training_type="autoregressive",
 ):
     msg = f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
-    logger.info(msg)
-
+    print(msg)
     ################################################################
     # load data
     ################################################################
@@ -64,7 +63,7 @@ def run_training(
     if single_file:
         # filename
         model_name = flnm[:-5] + "_Unet"
-        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/Unet/" + flnm[:-5] + "/"
 
         # Initialize the dataset and dataloader
         train_data = UNetDatasetSingle(
@@ -88,7 +87,7 @@ def run_training(
     else:
         # filename
         model_name = flnm + "_Unet"
-        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/Unet/" + flnm[:-5] + "/"
 
         train_data = UNetDatasetMult(
             flnm,
@@ -96,6 +95,7 @@ def run_training(
             reduced_resolution_t=reduced_resolution_t,
             reduced_batch=reduced_batch,
             saved_folder=base_path,
+            initial_step=initial_step,
         )
         val_data = UNetDatasetMult(
             flnm,
@@ -104,6 +104,7 @@ def run_training(
             reduced_batch=reduced_batch,
             if_test=True,
             saved_folder=base_path,
+            initial_step=initial_step,
         )
 
     train_loader = torch.utils.data.DataLoader(
@@ -121,7 +122,7 @@ def run_training(
     _, _data = next(iter(val_loader))
     dimensions = len(_data.shape)
     msg = f"Spatial Dimension: {dimensions - 3}"
-    logger.info(msg)
+    print(msg)
     if training_type in ["autoregressive"]:
         if dimensions == 4:
             model = UNet1d(in_channels * initial_step, out_channels).to(device)
@@ -153,11 +154,12 @@ def run_training(
         else:
             model_name = model_name + "-1-step"
 
-    model_path = model_save_path + "/Unet/" + model_name + ".pt"
+    model_path = Path(model_save_path) / "Unet" / f"{model_name}.pt"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     msg = f"Total parameters = {total_params}"
-    logger.info(msg)
+    print(msg)
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-4
@@ -196,7 +198,10 @@ def run_training(
             initial_step=initial_step,
             result_save_path=result_save_path,
         )
-        pickle.dump(errs, Path.open(model_name + ".pickle", "wb"))
+
+        path = Path(model_name + ".pickle")
+        with path.open("wb") as f:
+            pickle.dump(errs, f)
 
         return
 
@@ -204,7 +209,7 @@ def run_training(
     # file
     if continue_training:
         msg = "Restoring model (that is the network's weights) from file..."
-        logger.info(msg)
+        print(msg)
         checkpoint = torch.load(model_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
@@ -221,7 +226,7 @@ def run_training(
         loss_val_min = checkpoint["loss"]
 
     msg = "start training..."
-    logger.info(msg)
+    print(msg)
 
     if ar_mode:
         for ep in range(start_epoch, epochs):
@@ -241,7 +246,7 @@ def run_training(
 
                 if training_type in ["autoregressive"]:
                     # Initialize the prediction tensor
-                    pred = yy[..., :initial_step, :]
+                    pred = yy_tensor[..., :initial_step, :]
 
                     # Extract shape of the input tensor for reshaping (i.e. stacking the
                     # time and channels dimension together)
@@ -400,7 +405,7 @@ def run_training(
             t2 = default_timer()
             scheduler.step()
             msg = f"epoch: {ep}, loss: {loss.item():.5f}, t2-t1: {t2 - t1:.5f}, trainL2: {train_l2_step:.5f}, testL2: {val_l2_step:.5f}"
-            logger.info(msg)
+            print(msg)
 
     else:
         for ep in range(start_epoch, epochs):
@@ -523,10 +528,10 @@ def run_training(
             t2 = default_timer()
             scheduler.step()
             msg = f"epoch: {ep}, loss: {loss.item():.5f}, t2-t1: {t2 - t1:.5f}, trainL2: {train_l2_step:.5f}, testL2: {val_l2_step:.5f}"
-            logger.info(msg)
+            print(msg)
 
 
 if __name__ == "__main__":
     run_training()
     msg = "Done."
-    logger.info(msg)
+    print(msg)
