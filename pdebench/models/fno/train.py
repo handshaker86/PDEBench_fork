@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import pickle
 from pathlib import Path
+from timeit import default_timer
 
 import numpy as np
 import torch
@@ -52,7 +53,7 @@ def run_training(
     training_type="autoregressive",
 ):
     msg = f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
-    logger.info(msg)
+    print(msg)
 
     ################################################################
     # load data
@@ -62,7 +63,7 @@ def run_training(
         # filename
         model_name = flnm[:-5] + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
-        # print("FNODatasetSingle")
+        print("FNODatasetSingle")
 
         # Initialize the dataset and dataloader
         train_data = FNODatasetSingle(
@@ -88,7 +89,7 @@ def run_training(
         model_name = flnm + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
 
-        # print("FNODatasetMult")
+        print("FNODatasetMult")
         train_data = FNODatasetMult(
             flnm,
             saved_folder=base_path,
@@ -112,7 +113,7 @@ def run_training(
 
     _, _data, _ = next(iter(val_loader))
     dimensions = len(_data.shape)
-    # print("Spatial Dimension", dimensions - 3)
+    print("Spatial Dimension", dimensions - 3)
     if dimensions == 4:
         model = FNO1d(
             num_channels=num_channels,
@@ -142,10 +143,11 @@ def run_training(
     t_train = min(t_train, _data.shape[-2])
 
     model_path = model_save_path + "/FNO/" + model_name + ".pt"
+    Path(model_save_path + "/FNO/").mkdir(parents=True, exist_ok=True)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     msg = f"Total parameters = {total_params}"
-    logger.info(msg)
+    print(msg)
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-4
@@ -191,7 +193,7 @@ def run_training(
     # If desired, restore the network by loading the weights saved in the .pt
     # file
     if continue_training:
-        # print("Restoring model (that is the network's weights) from file...")
+        print("Restoring model (that is the network's weights) from file...")
         checkpoint = torch.load(model_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
@@ -207,9 +209,12 @@ def run_training(
         start_epoch = checkpoint["epoch"]
         loss_val_min = checkpoint["loss"]
 
+    msg = "start training..."
+    print(msg)
+
     for ep in range(start_epoch, epochs):
         model.train()
-        # t1 = default_timer()
+        t1 = default_timer()
         train_l2_step = 0
         train_l2_full = 0
         for xx, yy, grid in train_loader:
@@ -339,13 +344,13 @@ def run_training(
                         model_path,
                     )
 
-        # t2 = default_timer()
+        t2 = default_timer()
         scheduler.step()
-        # print(
-        #    "epoch: {0}, loss: {1:.5f}, t2-t1: {2:.5f}, trainL2: {3:.5f}, testL2: {4:.5f}".format(
-        #        ep, loss.item(), t2 - t1, train_l2_full, val_l2_full
-        #    )
-        # )
+        print(
+            "epoch: {0}, loss: {1:.5f}, t2-t1: {2:.5f}, trainL2: {3:.5f}, testL2: {4:.5f}".format(
+                ep, loss.item(), t2 - t1, train_l2_full, val_l2_full
+            )
+        )
 
 
 if __name__ == "__main__":
