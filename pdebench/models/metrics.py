@@ -424,7 +424,7 @@ def metrics(
                     inp = xx.reshape(inp_shape)
                     im = model(inp, grid)
                     pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], y), dim=-2)  # noqa: PLW2901
+                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
 
                 end_time = time.time()
                 num_frames = yy.shape[-2] - initial_step
