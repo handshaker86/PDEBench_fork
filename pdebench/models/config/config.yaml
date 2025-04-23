@@ -13,12 +13,12 @@ args:
   if_training: True
   continue_training: False
   num_workers: 2
-  batch_size: 5
+  batch_size: 20
   initial_step: 1
-  t_train: 101
-  model_update: 10
-  filename: "2D_diff-react_NA_NA"
-  single_file: False
+  t_train: 21
+  model_update: 2
+  filename: "2D_CFD_Rand_M0.1_Eta0.01_Zeta0.01_periodic_128_Train.hdf5"
+  single_file: True
   reduced_resolution: 1
   reduced_resolution_t: 1
   reduced_batch: 1
@@ -29,13 +29,13 @@ args:
   model_save_path: "models/"
   result_save_path : "results/"
   #Unet
-  in_channels: 2
-  out_channels: 2
+  in_channels: 4
+  out_channels: 4
   ar_mode: True
   pushforward: True
   unroll_step: 20
   #FNO
-  num_channels: 2
+  num_channels: 4
   modes: 12
   width: 20
   #Inverse
@@ -61,3 +61,5 @@ args:
   y_max: 1
   t_min: 0
   t_max: 5
+
+
