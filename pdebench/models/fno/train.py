@@ -73,6 +73,7 @@ def run_training(
             reduced_batch=reduced_batch,
             initial_step=initial_step,
             saved_folder=base_path,
+            if_test=False,
         )
         val_data = FNODatasetSingle(
             flnm,
@@ -92,12 +93,21 @@ def run_training(
         print("FNODatasetMult")
         train_data = FNODatasetMult(
             flnm,
+            initial_step=initial_step,
             saved_folder=base_path,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=False,
         )
         val_data = FNODatasetMult(
             flnm,
-            if_test=True,
+            initial_step=initial_step,
             saved_folder=base_path,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=True,
         )
 
     train_loader = torch.utils.data.DataLoader(
