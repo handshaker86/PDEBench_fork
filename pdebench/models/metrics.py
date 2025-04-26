@@ -409,7 +409,6 @@ def metrics(
         with torch.no_grad():
             itot = 0
             for itot, (xx, yy, grid) in enumerate(val_loader):
-                start_time = time.time()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
                 grid = grid.to(device)  # noqa: PLW2901
@@ -419,14 +418,20 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
+                # inference warm-up
+                inp = xx.reshape(inp_shape)
+                im = model(inp, grid)
+
+                start_time = time.time()
                 for t in range(initial_step, yy.shape[-2]):
+                    # import pdb; pdb.set_trace()
                     y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
                     im = model(inp, grid)
                     pred = torch.cat((pred, im), -2)
                     xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-
                 end_time = time.time()
+
                 num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
                 (
@@ -510,6 +515,7 @@ def metrics(
         )
 
     with open(result_save_path + "predict_time.txt", "w") as f:
+        f.write(f"total prediction time: {total_time:.5f}\n")
         f.write(f"prediction time for each batch: {batch_prediction_time:.5f}\n")
         f.write(f"prediction time for each frame: {frame_prediction_time:.5f}\n")
 
