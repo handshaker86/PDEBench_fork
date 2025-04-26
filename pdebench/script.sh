@@ -25,13 +25,14 @@ for FILE in "${FILES[@]}"; do
     continue
   fi
 
-  DATA_PATH="$DATASET_ROOT/$SUBFOLDER"
+  DATA_PATH="$DATASET_ROOT/$SUBFOLDER/"
 
   for MODEL in "${MODELS[@]}"; do
     echo "Training model: $MODEL | Dataset file: $FILE"
     python -m pdebench.models.train_models_forward \
       ++args.data_path="$DATA_PATH" \
       ++args.model_name="$MODEL" \
-      ++args.filename="$FILE"
+      ++args.filename="$FILE" \
+      ++args.single_file=True \
   done
 done
