@@ -329,6 +329,19 @@ def metrics(
 ):
     if mode == "Unet":
         with torch.no_grad():
+
+            # inference warm-up
+            xx, yy, grid = val_loader[0]
+            xx = xx.to(device)  # noqa: PLW2901
+            yy = yy.to(device)  # noqa: PLW2901
+            grid = grid.to(device)  # noqa: PLW2901
+            pred = yy[..., :initial_step, :]
+            inp_shape = list(xx.shape)
+            inp_shape = inp_shape[:-2]
+            inp_shape.append(-1)
+            inp = xx.reshape(inp_shape)
+            im = model(inp, grid)
+
             for itot, (xx, yy) in enumerate(val_loader):
                 start_time = time.time()
                 xx = xx.to(device)  # noqa: PLW2901
@@ -408,6 +421,19 @@ def metrics(
     elif mode == "FNO":
         with torch.no_grad():
             itot = 0
+
+            # inference warm-up
+            xx, yy, grid = val_loader[0]
+            xx = xx.to(device)  # noqa: PLW2901
+            yy = yy.to(device)  # noqa: PLW2901
+            grid = grid.to(device)  # noqa: PLW2901
+            pred = yy[..., :initial_step, :]
+            inp_shape = list(xx.shape)
+            inp_shape = inp_shape[:-2]
+            inp_shape.append(-1)
+            inp = xx.reshape(inp_shape)
+            im = model(inp, grid)
+
             for itot, (xx, yy, grid) in enumerate(val_loader):
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
@@ -418,13 +444,8 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                # inference warm-up
-                inp = xx.reshape(inp_shape)
-                im = model(inp, grid)
-
                 start_time = time.time()
                 for t in range(initial_step, yy.shape[-2]):
-                    # import pdb; pdb.set_trace()
                     y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
                     im = model(inp, grid)
