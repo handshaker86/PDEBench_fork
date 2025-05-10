@@ -62,7 +62,7 @@ def run_training(
     if single_file:
         # filename
         model_name = flnm[:-5] + "_FNO"
-        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/FNO/" + flnm + "/"
         print("FNODatasetSingle")
 
         # Initialize the dataset and dataloader
@@ -88,7 +88,7 @@ def run_training(
     else:
         # filename
         model_name = flnm + "_FNO"
-        result_save_path = result_save_path + "/FNO/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/FNO/" + flnm + "/"
 
         print("FNODatasetMult")
         train_data = FNODatasetMult(

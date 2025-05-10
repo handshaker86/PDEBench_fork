@@ -63,7 +63,7 @@ def run_training(
     if single_file:
         # filename
         model_name = flnm[:-5] + "_Unet"
-        result_save_path = result_save_path + "/Unet/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/Unet/" + flnm + "/"
 
         # Initialize the dataset and dataloader
         train_data = UNetDatasetSingle(
@@ -87,7 +87,7 @@ def run_training(
     else:
         # filename
         model_name = flnm + "_Unet"
-        result_save_path = result_save_path + "/Unet/" + flnm[:-5] + "/"
+        result_save_path = result_save_path + "/Unet/" + flnm + "/"
 
         train_data = UNetDatasetMult(
             flnm,
