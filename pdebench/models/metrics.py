@@ -331,19 +331,24 @@ def metrics(
         with torch.no_grad():
 
             # inference warm-up
-            xx, yy, grid = val_loader[0]
+            xx, yy = next(iter(val_loader))
             xx = xx.to(device)  # noqa: PLW2901
             yy = yy.to(device)  # noqa: PLW2901
-            grid = grid.to(device)  # noqa: PLW2901
             pred = yy[..., :initial_step, :]
             inp_shape = list(xx.shape)
             inp_shape = inp_shape[:-2]
             inp_shape.append(-1)
             inp = xx.reshape(inp_shape)
-            im = model(inp, grid)
+            temp_shape = [0, -1]
+            temp_shape.extend(list(range(1, len(inp.shape) - 1)))
+            inp = inp.permute(temp_shape)
+            temp_shape = [0]
+            temp_shape.extend(list(range(2, len(inp.shape))))
+            temp_shape.append(1)
+            im = model(inp).permute(temp_shape).unsqueeze(-2)
+            pred = torch.cat((pred, im), -2)
 
             for itot, (xx, yy) in enumerate(val_loader):
-                start_time = time.time()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
 
@@ -352,6 +357,7 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
+                start_time = time.time()
                 for t in range(initial_step, yy.shape[-2]):
                     inp = xx.reshape(inp_shape)
                     temp_shape = [0, -1]
@@ -366,8 +372,8 @@ def metrics(
                     im = model(inp).permute(temp_shape).unsqueeze(-2)
                     pred = torch.cat((pred, im), -2)
                     xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-
                 end_time = time.time()
+
                 num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
 
@@ -423,7 +429,7 @@ def metrics(
             itot = 0
 
             # inference warm-up
-            xx, yy, grid = val_loader[0]
+            xx, yy, grid = next(iter(val_loader))
             xx = xx.to(device)  # noqa: PLW2901
             yy = yy.to(device)  # noqa: PLW2901
             grid = grid.to(device)  # noqa: PLW2901
@@ -504,13 +510,13 @@ def metrics(
     elif mode == "PINN":
         raise NotImplementedError
 
-    err_RMSE = np.array(err_RMSE.data.cpu() / itot)
-    err_nRMSE = np.array(err_nRMSE.data.cpu() / itot)
-    err_CSV = np.array(err_CSV.data.cpu() / itot)
-    err_Max = np.array(err_Max.data.cpu() / itot)
-    err_BD = np.array(err_BD.data.cpu() / itot)
-    err_F = np.array(err_F.data.cpu() / itot)
-    batch_prediction_time = total_time / itot
+    err_RMSE = np.array(err_RMSE.data.cpu() / (itot+1))
+    err_nRMSE = np.array(err_nRMSE.data.cpu() / (itot+1))
+    err_CSV = np.array(err_CSV.data.cpu() / (itot+1))
+    err_Max = np.array(err_Max.data.cpu() / (itot+1))
+    err_BD = np.array(err_BD.data.cpu() / (itot+1))
+    err_F = np.array(err_F.data.cpu() / (itot+1))
+    batch_prediction_time = total_time / (itot+1)
     frame_prediction_time = batch_prediction_time / num_frames
 
     logger.info(f"RMSE: {err_RMSE:.5f}")
@@ -521,7 +527,7 @@ def metrics(
     logger.info(f"RMSE in Fourier space: {err_F}")
     logger.info(f"Prediction time: {batch_prediction_time:.5f}")
 
-    val_l2_time = val_l2_time / itot
+    val_l2_time = val_l2_time / (itot+1)
 
     # save the metrics and prediction time
     os.makedirs(result_save_path, exist_ok=True)
