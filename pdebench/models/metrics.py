@@ -331,16 +331,17 @@ def metrics(
         with torch.no_grad():
 
             # inference warm-up
-            xx, yy, grid = val_loader[0]
-            xx = xx.to(device)  # noqa: PLW2901
-            yy = yy.to(device)  # noqa: PLW2901
-            grid = grid.to(device)  # noqa: PLW2901
-            pred = yy[..., :initial_step, :]
-            inp_shape = list(xx.shape)
-            inp_shape = inp_shape[:-2]
-            inp_shape.append(-1)
-            inp = xx.reshape(inp_shape)
-            im = model(inp, grid)
+            for _ in range(5):
+                xx, yy, grid = val_loader[0]
+                xx = xx.to(device)  # noqa: PLW2901
+                yy = yy.to(device)  # noqa: PLW2901
+                grid = grid.to(device)  # noqa: PLW2901
+                pred = yy[..., :initial_step, :]
+                inp_shape = list(xx.shape)
+                inp_shape = inp_shape[:-2]
+                inp_shape.append(-1)
+                inp = xx.reshape(inp_shape)
+                im = model(inp, grid)
 
             for itot, (xx, yy) in enumerate(val_loader):
                 start_time = time.time()
