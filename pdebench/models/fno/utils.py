@@ -168,7 +168,7 @@ class FNODatasetSingle(Dataset):
         reduced_resolution_t=1,
         reduced_batch=1,
         if_test=False,
-        test_ratio=0.1,
+        test_ratio=0.01,
         num_samples_max=-1,
     ):
         """
@@ -195,10 +195,12 @@ class FNODatasetSingle(Dataset):
                         f["density"], dtype=np.float32
                     )  # batch, time, x,...
                     idx_cfd = _data.shape
+                    test_idx = int(idx_cfd[0] * (1 - test_ratio))
+                    batch_num = idx_cfd[0] - test_idx
                     if len(idx_cfd) == 3:  # 1D
                         self.data = np.zeros(
                             [
-                                idx_cfd[0] // reduced_batch,
+                                batch_num,
                                 idx_cfd[2] // reduced_resolution,
                                 mt.ceil(idx_cfd[1] / reduced_resolution_t),
                                 3,
@@ -207,7 +209,7 @@ class FNODatasetSingle(Dataset):
                         )
                         # density
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                         ]
@@ -219,7 +221,7 @@ class FNODatasetSingle(Dataset):
                             f["pressure"], dtype=np.float32
                         )  # batch, time, x,...
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                         ]
@@ -231,7 +233,7 @@ class FNODatasetSingle(Dataset):
                             f["Vx"], dtype=np.float32
                         )  # batch, time, x,...
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                         ]
@@ -245,9 +247,12 @@ class FNODatasetSingle(Dataset):
                         ).unsqueeze(-1)
                         # print(self.data.shape)
                     if len(idx_cfd) == 4:  # 2D
+                        idx_cfd = _data.shape
+                        test_idx = int(idx_cfd[0] * (1 - test_ratio))
+                        batch_num = idx_cfd[0] - test_idx
                         self.data = np.zeros(
                             [
-                                idx_cfd[0] // reduced_batch,
+                                batch_num,
                                 idx_cfd[2] // reduced_resolution,
                                 idx_cfd[3] // reduced_resolution,
                                 mt.ceil(idx_cfd[1] / reduced_resolution_t),
@@ -255,9 +260,11 @@ class FNODatasetSingle(Dataset):
                             ],
                             dtype=np.float32,
                         )
+                       
+
                         # density
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                             ::reduced_resolution,
@@ -270,7 +277,7 @@ class FNODatasetSingle(Dataset):
                             f["pressure"], dtype=np.float32
                         )  # batch, time, x,...
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                             ::reduced_resolution,
@@ -283,7 +290,7 @@ class FNODatasetSingle(Dataset):
                             f["Vx"], dtype=np.float32
                         )  # batch, time, x,...
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                             ::reduced_resolution,
@@ -296,7 +303,7 @@ class FNODatasetSingle(Dataset):
                             f["Vy"], dtype=np.float32
                         )  # batch, time, x,...
                         _data = _data[
-                            ::reduced_batch,
+                            test_idx:,
                             ::reduced_resolution_t,
                             ::reduced_resolution,
                             ::reduced_resolution,
@@ -502,16 +509,16 @@ class FNODatasetSingle(Dataset):
                 self.grid = _grid
                 self.tsteps_t = tsteps_t
 
-        if num_samples_max > 0:
-            num_samples_max = min(num_samples_max, self.data.shape[0])
-        else:
-            num_samples_max = self.data.shape[0]
+        # if num_samples_max > 0:
+        #     num_samples_max = min(num_samples_max, self.data.shape[0])
+        # else:
+        #     num_samples_max = self.data.shape[0]
 
-        test_idx = int(num_samples_max * test_ratio)
-        if if_test:
-            self.data = self.data[:test_idx]
-        else:
-            self.data = self.data[test_idx:num_samples_max]
+        # test_idx = int(num_samples_max * test_ratio)
+        # if if_test:
+        #     self.data = self.data[:test_idx]
+        # else:
+        #     self.data = self.data[test_idx:num_samples_max]
 
         # Time steps used as initial conditions
         self.initial_step = initial_step
@@ -535,7 +542,7 @@ class FNODatasetMult(Dataset):
         reduced_resolution_t=1,
         reduced_batch=1,
         if_test=False,
-        test_ratio=0.1,
+        test_ratio=0.01,
     ):
         """
 
@@ -549,7 +556,7 @@ class FNODatasetMult(Dataset):
         """
 
         # Define path to files
-        self.file_path = Path(saved_folder + filename + ".h5").resolve()
+        self.file_path = Path(saved_folder + '/' + filename + '.h5' ).resolve()
 
         # Extract list of seeds
         with h5py.File(self.file_path, "r") as h5_file:

@@ -168,7 +168,7 @@ class UNetDatasetSingle(Dataset):
         reduced_resolution_t=1,
         reduced_batch=1,
         if_test=False,
-        test_ratio=0.1,
+        test_ratio=0.01,
         num_samples_max=-1,
     ):
         """
@@ -424,7 +424,7 @@ class UNetDatasetMult(Dataset):
         reduced_resolution_t=1,
         reduced_batch=1,
         if_test=False,
-        test_ratio=0.1,
+        test_ratio=0.01,
     ):
         """
 
@@ -438,7 +438,7 @@ class UNetDatasetMult(Dataset):
         """
 
         # Define path to files
-        self.file_path = Path(saved_folder + filename + ".h5").resolve()
+        self.file_path = Path(saved_folder + '/'+ filename + ".h5").resolve()
 
         # Extract list of seeds
         with h5py.File(self.file_path, "r") as h5_file:
