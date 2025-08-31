@@ -61,7 +61,7 @@ def run_training(
 
     if single_file:
         # filename
-        model_name = flnm[:-5] + "_FNO"
+        model_name = flnm + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm + "/"
         print("FNODatasetSingle")
 
@@ -152,7 +152,7 @@ def run_training(
     # Set maximum time step of the data to train
     t_train = min(t_train, _data.shape[-2])
 
-    model_path = model_save_path + "/FNO/" + model_name + ".pt"
+    model_path = model_save_path + "FNO/" + model_name + ".pt"
     Path(model_save_path + "/FNO/").mkdir(parents=True, exist_ok=True)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
