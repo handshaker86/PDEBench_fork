@@ -331,24 +331,21 @@ def metrics(
         with torch.no_grad():
 
             # inference warm-up
-            xx, yy = next(iter(val_loader))
-            xx = xx.to(device)  # noqa: PLW2901
-            yy = yy.to(device)  # noqa: PLW2901
-            pred = yy[..., :initial_step, :]
-            inp_shape = list(xx.shape)
-            inp_shape = inp_shape[:-2]
-            inp_shape.append(-1)
-            inp = xx.reshape(inp_shape)
-            temp_shape = [0, -1]
-            temp_shape.extend(list(range(1, len(inp.shape) - 1)))
-            inp = inp.permute(temp_shape)
-            temp_shape = [0]
-            temp_shape.extend(list(range(2, len(inp.shape))))
-            temp_shape.append(1)
-            im = model(inp).permute(temp_shape).unsqueeze(-2)
-            pred = torch.cat((pred, im), -2)
+            for _ in range(5):
+                xx, yy, grid = val_loader[0]
+                xx = xx.to(device)  # noqa: PLW2901
+                yy = yy.to(device)  # noqa: PLW2901
+                grid = grid.to(device)  # noqa: PLW2901
+                pred = yy[..., :initial_step, :]
+                inp_shape = list(xx.shape)
+                inp_shape = inp_shape[:-2]
+                inp_shape.append(-1)
+                inp = xx.reshape(inp_shape)
+                im = model(inp, grid)
 
+            compute_time_total = 0.0
             for itot, (xx, yy) in enumerate(val_loader):
+                start_time = time.perf_counter()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
 
@@ -369,11 +366,17 @@ def metrics(
                     temp_shape = [0]
                     temp_shape.extend(list(range(2, len(inp.shape))))
                     temp_shape.append(1)
+                    compute_start = time.perf_counter()
                     im = model(inp).permute(temp_shape).unsqueeze(-2)
+                    torch.cuda.synchronize()
+                    compute_end = time.perf_counter()
+                    compute_time = compute_end - compute_start
+                    compute_time_total += compute_time
                     pred = torch.cat((pred, im), -2)
                     xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-                end_time = time.time()
-
+                    
+                torch.cuda.synchronize() 
+                end_time = time.perf_counter()
                 num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
 
@@ -426,20 +429,21 @@ def metrics(
 
     elif mode == "FNO":
         with torch.no_grad():
-            itot = 0
 
             # inference warm-up
-            xx, yy, grid = next(iter(val_loader))
-            xx = xx.to(device)  # noqa: PLW2901
-            yy = yy.to(device)  # noqa: PLW2901
-            grid = grid.to(device)  # noqa: PLW2901
-            pred = yy[..., :initial_step, :]
-            inp_shape = list(xx.shape)
-            inp_shape = inp_shape[:-2]
-            inp_shape.append(-1)
-            inp = xx.reshape(inp_shape)
-            im = model(inp, grid)
+            for _ in range(5):
+                xx, yy, grid = val_loader[0]
+                xx = xx.to(device)  # noqa: PLW2901
+                yy = yy.to(device)  # noqa: PLW2901
+                grid = grid.to(device)  # noqa: PLW2901
+                pred = yy[..., :initial_step, :]
+                inp_shape = list(xx.shape)
+                inp_shape = inp_shape[:-2]
+                inp_shape.append(-1)
+                inp = xx.reshape(inp_shape)
+                im = model(inp, grid)
 
+            compute_time_total = 0.0
             for itot, (xx, yy, grid) in enumerate(val_loader):
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
@@ -450,14 +454,19 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                start_time = time.time()
+                start_time = time.perf_counter()
                 for t in range(initial_step, yy.shape[-2]):
                     y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
+                    compute_start = time.perf_counter()
                     im = model(inp, grid)
+                    torch.cuda.synchronize()
+                    compute_end = time.perf_counter()
+                    compute_time = compute_end - compute_start
+                    compute_time_total += compute_time
                     pred = torch.cat((pred, im), -2)
                     xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-                end_time = time.time()
+                end_time = time.perf_counter()
 
                 num_frames = yy.shape[-2] - initial_step
                 prediction_time = end_time - start_time
@@ -526,6 +535,7 @@ def metrics(
     logger.info(f"RMSE at boundaries: {err_BD:.5f}")
     logger.info(f"RMSE in Fourier space: {err_F}")
     logger.info(f"Prediction time: {batch_prediction_time:.5f}")
+    logger.info(f"Computation time: {compute_time_total:.5f}")
 
     val_l2_time = val_l2_time / (itot+1)
 
@@ -545,6 +555,9 @@ def metrics(
         f.write(f"total prediction time: {total_time:.5f}\n")
         f.write(f"prediction time for each batch: {batch_prediction_time:.5f}\n")
         f.write(f"prediction time for each frame: {frame_prediction_time:.5f}\n")
+
+    with open(result_save_path + "compute_time.txt", "w") as f:
+        f.write(f"total computation time: {compute_time_total:.5f}\n")
 
     if plot:
         dim = len(yy.shape) - 3
