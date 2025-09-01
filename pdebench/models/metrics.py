@@ -342,6 +342,7 @@ def metrics(
                 inp_shape.append(-1)
                 inp = xx.reshape(inp_shape)
                 im = model(inp, grid)
+            torch.cuda.synchronize()
 
             compute_time_total = 0.0
             for itot, (xx, yy) in enumerate(val_loader):
@@ -354,7 +355,6 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                start_time = time.time()
                 for t in range(initial_step, yy.shape[-2]):
                     inp = xx.reshape(inp_shape)
                     temp_shape = [0, -1]
@@ -442,9 +442,11 @@ def metrics(
                 inp_shape.append(-1)
                 inp = xx.reshape(inp_shape)
                 im = model(inp, grid)
+            torch.cuda.synchronize()
 
             compute_time_total = 0.0
             for itot, (xx, yy, grid) in enumerate(val_loader):
+                start_time = time.perf_counter()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
                 grid = grid.to(device)  # noqa: PLW2901
@@ -454,7 +456,6 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
-                start_time = time.perf_counter()
                 for t in range(initial_step, yy.shape[-2]):
                     y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
