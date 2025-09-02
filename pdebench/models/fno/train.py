@@ -61,7 +61,7 @@ def run_training(
 
     if single_file:
         # filename
-        model_name = flnm + "_FNO"
+        model_name = flnm[:-5] + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm + "/"
         print("FNODatasetSingle")
 
@@ -172,7 +172,7 @@ def run_training(
     start_epoch = 0
 
     if not if_training:
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
         model.eval()
