@@ -332,21 +332,22 @@ def metrics(
 
             # inference warm-up
             for _ in range(5):
-                xx, yy, grid = val_loader[0]
+                xx, yy = next(iter(val_loader))
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
-                grid = grid.to(device)  # noqa: PLW2901
                 pred = yy[..., :initial_step, :]
                 inp_shape = list(xx.shape)
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
                 inp = xx.reshape(inp_shape)
-                im = model(inp, grid)
+                temp_shape = [0, -1]
+                temp_shape.extend(list(range(1, len(inp.shape) - 1)))
+                inp = inp.permute(temp_shape)
+                im = model(inp)
             torch.cuda.synchronize()
 
             compute_time_total = 0.0
             for itot, (xx, yy) in enumerate(val_loader):
-                start_time = time.perf_counter()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
 
@@ -355,6 +356,7 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
+                start_time = time.perf_counter()
                 for t in range(initial_step, yy.shape[-2]):
                     inp = xx.reshape(inp_shape)
                     temp_shape = [0, -1]
@@ -432,7 +434,7 @@ def metrics(
 
             # inference warm-up
             for _ in range(5):
-                xx, yy, grid = val_loader[0]
+                xx, yy, grid = next(iter(val_loader))
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
                 grid = grid.to(device)  # noqa: PLW2901
@@ -446,7 +448,6 @@ def metrics(
 
             compute_time_total = 0.0
             for itot, (xx, yy, grid) in enumerate(val_loader):
-                start_time = time.perf_counter()
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
                 grid = grid.to(device)  # noqa: PLW2901
@@ -456,6 +457,7 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
+                start_time = time.perf_counter()
                 for t in range(initial_step, yy.shape[-2]):
                     y = yy[..., t : t + 1, :]
                     inp = xx.reshape(inp_shape)
