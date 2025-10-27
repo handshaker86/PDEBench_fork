@@ -3,12 +3,13 @@
 # List of training filenames
 FILES=(
   "2D_CFD_Turb_M0.1_Eta1e-08_Zeta1e-08_periodic_512_Train.hdf5"
-  "2D_CFD_Rand_M0.1_Eta0.01_Zeta0.01_periodic_128_Train.hdf5"
+  # "2D_CFD_Rand_M0.1_Eta0.01_Zeta0.01_periodic_128_Train.hdf5"
   "2D_CFD_Rand_M1.0_Eta0.1_Zeta0.1_periodic_128_Train.hdf5"
 )
 
 # List of model names
-MODELS=("FNO" "Unet")
+# MODELS=("FNO" "Unet")
+MODELS=("Unet")
 
 # Root directory of the dataset
 DATASET_ROOT="../pdebench_dataset/2D/CFD"
