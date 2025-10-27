@@ -326,12 +326,19 @@ def metrics(
     mode="FNO",
     initial_step=None,
     result_save_path=None,
+    warmup_runs: int = 5,
+    average_runs: int = 10,
 ):
+
+    num_runs = max(1, average_runs)
+    all_total_times = []
+
     if mode == "Unet":
         with torch.no_grad():
 
             # inference warm-up
-            for _ in range(5):
+            print("Warming up GPU...")
+            for _ in range(warmup_runs):
                 xx, yy = next(iter(val_loader))
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
@@ -340,100 +347,99 @@ def metrics(
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
                 inp = xx.reshape(inp_shape)
-                temp_shape = [0, -1]
-                temp_shape.extend(list(range(1, len(inp.shape) - 1)))
-                inp = inp.permute(temp_shape)
+                shape = [0, -1]
+                shape.extend(list(range(1, len(inp.shape) - 1)))
+                inp = inp.permute(shape)
                 im = model(inp)
             torch.cuda.synchronize()
+            print(f"GPU is ready.")
 
-            compute_time_total = 0.0
-            for itot, (xx, yy) in enumerate(val_loader):
-                xx = xx.to(device)  # noqa: PLW2901
-                yy = yy.to(device)  # noqa: PLW2901
+            for run_idx in range(num_runs):
+                for itot, (xx, yy) in enumerate(val_loader):
+                    xx = xx.to(device)  # noqa: PLW2901
+                    yy = yy.to(device)  # noqa: PLW2901
 
-                pred = yy[..., :initial_step, :]
-                inp_shape = list(xx.shape)
-                inp_shape = inp_shape[:-2]
-                inp_shape.append(-1)
+                    pred = yy[..., :initial_step, :]
+                    inp_shape = list(xx.shape)
+                    inp_shape = inp_shape[:-2]
+                    inp_shape.append(-1)
 
-                start_time = time.perf_counter()
-                for t in range(initial_step, yy.shape[-2]):
-                    inp = xx.reshape(inp_shape)
-                    temp_shape = [0, -1]
-                    temp_shape.extend(list(range(1, len(inp.shape) - 1)))
-                    inp = inp.permute(temp_shape)
-
-                    y = yy[..., t : t + 1, :]
-
-                    temp_shape = [0]
-                    temp_shape.extend(list(range(2, len(inp.shape))))
-                    temp_shape.append(1)
-                    compute_start = time.perf_counter()
-                    im = model(inp).permute(temp_shape).unsqueeze(-2)
                     torch.cuda.synchronize()
-                    compute_end = time.perf_counter()
-                    compute_time = compute_end - compute_start
-                    compute_time_total += compute_time
-                    pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-                    
-                torch.cuda.synchronize() 
-                end_time = time.perf_counter()
-                num_frames = yy.shape[-2] - initial_step
-                prediction_time = end_time - start_time
+                    start_time = time.perf_counter()
 
-                (
-                    _err_RMSE,
-                    _err_nRMSE,
-                    _err_CSV,
-                    _err_Max,
-                    _err_BD,
-                    _err_F,
-                ) = metric_func(
-                    pred[..., initial_step:, :],
-                    yy[..., initial_step:, :],
-                    if_mean=True,
-                    Lx=Lx,
-                    Ly=Ly,
-                    Lz=Lz,
-                    initial_step=initial_step,
-                )  # only calculate the metrics for the prediction part
+                    for t in range(initial_step, yy.shape[-2]):
+                        inp = xx.reshape(inp_shape)
+                        shape = [0, -1]
+                        shape.extend(list(range(1, len(inp.shape) - 1)))
+                        inp = inp.permute(shape)
+                        shape = [0]
+                        shape.extend(list(range(2, len(inp.shape))))
+                        shape.append(1)
+                        im = model(inp).permute(shape).unsqueeze(-2)
+                        pred = torch.cat((pred, im), -2)
+                        xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
 
-                if itot == 0:
-                    err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
+                    torch.cuda.synchronize()
+                    end_time = time.perf_counter()
+                    num_frames = yy.shape[-2] - initial_step
+                    prediction_time = end_time - start_time
+
+                    (
                         _err_RMSE,
                         _err_nRMSE,
                         _err_CSV,
                         _err_Max,
                         _err_BD,
                         _err_F,
+                    ) = metric_func(
+                        pred[..., initial_step:, :],
+                        yy[..., initial_step:, :],
+                        if_mean=True,
+                        Lx=Lx,
+                        Ly=Ly,
+                        Lz=Lz,
+                        initial_step=initial_step,
                     )
-                    total_time = prediction_time
-                    pred_plot = pred[:1]
-                    target_plot = yy[:1]
-                    val_l2_time = torch.zeros(yy.shape[-2]).to(device)
-                else:
-                    err_RMSE += _err_RMSE
-                    err_nRMSE += _err_nRMSE
-                    err_CSV += _err_CSV
-                    err_Max += _err_Max
-                    err_BD += _err_BD
-                    err_F += _err_F
 
-                    total_time += prediction_time
+                    if itot == 0:
+                        err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
+                            _err_RMSE,
+                            _err_nRMSE,
+                            _err_CSV,
+                            _err_Max,
+                            _err_BD,
+                            _err_F,
+                        )
+                        total_time = prediction_time
+                        pred_plot = pred[:1]
+                        target_plot = yy[:1]
+                        val_l2_time = torch.zeros(yy.shape[-2]).to(device)
+                    else:
+                        err_RMSE += _err_RMSE
+                        err_nRMSE += _err_nRMSE
+                        err_CSV += _err_CSV
+                        err_Max += _err_Max
+                        err_BD += _err_BD
+                        err_F += _err_F
 
-                    mean_dim = list(range(len(yy.shape) - 2))
-                    mean_dim.append(-1)
-                    mean_dim = tuple(mean_dim)
-                    val_l2_time += torch.sqrt(
-                        torch.mean((pred - yy) ** 2, dim=mean_dim)
-                    )
+                        total_time += prediction_time
+
+                        mean_dim = list(range(len(yy.shape) - 2))
+                        mean_dim.append(-1)
+                        mean_dim = tuple(mean_dim)
+                        val_l2_time += torch.sqrt(
+                            torch.mean((pred - yy) ** 2, dim=mean_dim)
+                        )
+                all_total_times.append(total_time)
+
+            total_time = sum(all_total_times) / len(all_total_times)
 
     elif mode == "FNO":
         with torch.no_grad():
 
             # inference warm-up
-            for _ in range(5):
+            print("Warming up GPU...")
+            for _ in range(warmup_runs):
                 xx, yy, grid = next(iter(val_loader))
                 xx = xx.to(device)  # noqa: PLW2901
                 yy = yy.to(device)  # noqa: PLW2901
@@ -445,90 +451,93 @@ def metrics(
                 inp = xx.reshape(inp_shape)
                 im = model(inp, grid)
             torch.cuda.synchronize()
+            print(f"GPU is ready.")
 
-            compute_time_total = 0.0
-            for itot, (xx, yy, grid) in enumerate(val_loader):
-                xx = xx.to(device)  # noqa: PLW2901
-                yy = yy.to(device)  # noqa: PLW2901
-                grid = grid.to(device)  # noqa: PLW2901
+            for run_idx in range(num_runs):
+                for itot, (xx, yy, grid) in enumerate(val_loader):
+                    xx = xx.to(device)  # noqa: PLW2901
+                    yy = yy.to(device)  # noqa: PLW2901
+                    grid = grid.to(device)  # noqa: PLW2901
 
-                pred = yy[..., :initial_step, :]
-                inp_shape = list(xx.shape)
-                inp_shape = inp_shape[:-2]
-                inp_shape.append(-1)
+                    pred = yy[..., :initial_step, :]
+                    inp_shape = list(xx.shape)
+                    inp_shape = inp_shape[:-2]
+                    inp_shape.append(-1)
 
-                start_time = time.perf_counter()
-                for t in range(initial_step, yy.shape[-2]):
-                    y = yy[..., t : t + 1, :]
-                    inp = xx.reshape(inp_shape)
-                    compute_start = time.perf_counter()
-                    im = model(inp, grid)
                     torch.cuda.synchronize()
-                    compute_end = time.perf_counter()
-                    compute_time = compute_end - compute_start
-                    compute_time_total += compute_time
-                    pred = torch.cat((pred, im), -2)
-                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
-                end_time = time.perf_counter()
+                    start_time = time.perf_counter()
+                    for t in range(initial_step, yy.shape[-2]):
+                        inp = xx.reshape(inp_shape)
+                        im = model(inp, grid)
+                        pred = torch.cat((pred, im), -2)
+                        xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
 
-                num_frames = yy.shape[-2] - initial_step
-                prediction_time = end_time - start_time
-                (
-                    _err_RMSE,
-                    _err_nRMSE,
-                    _err_CSV,
-                    _err_Max,
-                    _err_BD,
-                    _err_F,
-                ) = metric_func(
-                    pred[..., initial_step:, :],
-                    yy[..., initial_step:, :],
-                    if_mean=True,
-                    Lx=Lx,
-                    Ly=Ly,
-                    Lz=Lz,
-                    initial_step=initial_step,
-                )  # only calculate the metrics for the prediction part
-                if itot == 0:
-                    err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
+                    torch.cuda.synchronize()
+                    end_time = time.perf_counter()
+                    num_frames = yy.shape[-2] - initial_step
+                    prediction_time = end_time - start_time
+
+                    (
                         _err_RMSE,
                         _err_nRMSE,
                         _err_CSV,
                         _err_Max,
                         _err_BD,
                         _err_F,
+                    ) = metric_func(
+                        pred[..., initial_step:, :],
+                        yy[..., initial_step:, :],
+                        if_mean=True,
+                        Lx=Lx,
+                        Ly=Ly,
+                        Lz=Lz,
+                        initial_step=initial_step,
                     )
-                    pred_plot = pred[:1]
-                    target_plot = yy[:1]
-                    val_l2_time = torch.zeros(yy.shape[-2]).to(device)
-                    total_time = prediction_time
-                else:
-                    err_RMSE += _err_RMSE
-                    err_nRMSE += _err_nRMSE
-                    err_CSV += _err_CSV
-                    err_Max += _err_Max
-                    err_BD += _err_BD
-                    err_F += _err_F
 
-                    total_time += prediction_time
+                    if itot == 0:
+                        err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F = (
+                            _err_RMSE,
+                            _err_nRMSE,
+                            _err_CSV,
+                            _err_Max,
+                            _err_BD,
+                            _err_F,
+                        )
+                        pred_plot = pred[:1]
+                        target_plot = yy[:1]
+                        val_l2_time = torch.zeros(yy.shape[-2]).to(device)
+                        total_time = prediction_time
+                    else:
+                        err_RMSE += _err_RMSE
+                        err_nRMSE += _err_nRMSE
+                        err_CSV += _err_CSV
+                        err_Max += _err_Max
+                        err_BD += _err_BD
+                        err_F += _err_F
 
-                    mean_dim = list(range(len(yy.shape) - 2))
-                    mean_dim.append(-1)
-                    mean_dim = tuple(mean_dim)
-                    val_l2_time += torch.sqrt(
-                        torch.mean((pred - yy) ** 2, dim=mean_dim)
-                    )
+                        total_time += prediction_time
+
+                        mean_dim = list(range(len(yy.shape) - 2))
+                        mean_dim.append(-1)
+                        mean_dim = tuple(mean_dim)
+                        val_l2_time += torch.sqrt(
+                            torch.mean((pred - yy) ** 2, dim=mean_dim)
+                        )
+                all_total_times.append(total_time)
+
+            total_time = sum(all_total_times) / len(all_total_times)
 
     elif mode == "PINN":
         raise NotImplementedError
 
-    err_RMSE = np.array(err_RMSE.data.cpu() / (itot+1))
-    err_nRMSE = np.array(err_nRMSE.data.cpu() / (itot+1))
-    err_CSV = np.array(err_CSV.data.cpu() / (itot+1))
-    err_Max = np.array(err_Max.data.cpu() / (itot+1))
-    err_BD = np.array(err_BD.data.cpu() / (itot+1))
-    err_F = np.array(err_F.data.cpu() / (itot+1))
-    batch_prediction_time = total_time / (itot+1)
+    err_RMSE = np.array(err_RMSE.data.cpu() / (itot + 1))
+    err_nRMSE = np.array(err_nRMSE.data.cpu() / (itot + 1))
+    err_CSV = np.array(err_CSV.data.cpu() / (itot + 1))
+    err_Max = np.array(err_Max.data.cpu() / (itot + 1))
+    err_BD = np.array(err_BD.data.cpu() / (itot + 1))
+    err_F = np.array(err_F.data.cpu() / (itot + 1))
+
+    batch_prediction_time = total_time / (itot + 1)
     frame_prediction_time = batch_prediction_time / num_frames
 
     logger.info(f"RMSE: {err_RMSE:.5f}")
@@ -537,10 +546,9 @@ def metrics(
     logger.info(f"Maximum value of rms error: {err_Max:.5f}")
     logger.info(f"RMSE at boundaries: {err_BD:.5f}")
     logger.info(f"RMSE in Fourier space: {err_F}")
-    logger.info(f"Prediction time: {batch_prediction_time:.5f}")
-    logger.info(f"Computation time: {compute_time_total:.5f}")
+    logger.info(f"Average Prediction time (per batch): {batch_prediction_time:.5f}")
 
-    val_l2_time = val_l2_time / (itot+1)
+    val_l2_time = val_l2_time / (itot + 1)
 
     # save the metrics and prediction time
     os.makedirs(result_save_path, exist_ok=True)
@@ -558,9 +566,6 @@ def metrics(
         f.write(f"total prediction time: {total_time:.5f}\n")
         f.write(f"prediction time for each batch: {batch_prediction_time:.5f}\n")
         f.write(f"prediction time for each frame: {frame_prediction_time:.5f}\n")
-
-    with open(result_save_path + "compute_time.txt", "w") as f:
-        f.write(f"total computation time: {compute_time_total:.5f}\n")
 
     if plot:
         dim = len(yy.shape) - 3
