@@ -26,6 +26,7 @@ def run_training(
     modes,
     width,
     initial_step,
+    prediction_step,
     t_train,
     num_channels,
     batch_size,
@@ -193,6 +194,7 @@ def run_training(
             t_min,
             t_max,
             initial_step=initial_step,
+            prediction_step=prediction_step,
             result_save_path=result_save_path,
         )
         with Path(model_name + ".pickle").open("wb") as pb:
@@ -247,15 +249,17 @@ def run_training(
 
             if training_type in ["autoregressive"]:
                 # Autoregressive loop
-                for t in range(initial_step, t_train):
+                for t in range(
+                    initial_step, t_train - prediction_step + 1, prediction_step
+                ):
                     # Reshape input tensor into [b, x1, ..., xd, t_init*v]
                     inp = xx.reshape(inp_shape)
 
                     # Extract target at current time step
-                    y = yy[..., t : t + 1, :]
+                    y = yy[..., t : t + prediction_step, :]
 
                     # Model run
-                    im = model(inp, grid)
+                    im = model(inp, grid)  # im [b, ..., prediction_step, v]
 
                     # Loss calculation
                     _batch = im.size(0)
@@ -267,12 +271,18 @@ def run_training(
 
                     # Concatenate the prediction at the current time step to be used
                     # as input for the next time step
-                    xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                    xx = torch.cat(
+                        (xx[..., prediction_step:, :], im), dim=-2
+                    )  # noqa: PLW2901
 
                 train_l2_step += loss.item()
                 _batch = yy.size(0)
                 _yy = yy[..., :t_train, :]  # if t_train is not -1
-                l2_full = loss_fn(pred.reshape(_batch, -1), _yy.reshape(_batch, -1))
+
+                pred_len = pred.shape[-2]
+                l2_full = loss_fn(
+                    pred.reshape(_batch, -1), _yy[..., :pred_len, :].reshape(_batch, -1)
+                )
                 train_l2_full += l2_full.item()
 
                 optimizer.zero_grad()
@@ -281,7 +291,7 @@ def run_training(
 
             if training_type in ["single"]:
                 x = xx[..., 0, :]
-                y = yy[..., t_train - 1 : t_train, :]
+                y = yy[..., t_train - prediction_step : t_train, :]
                 pred = model(x, grid)
                 _batch = yy.size(0)
                 loss += loss_fn(pred.reshape(_batch, -1), y.reshape(_batch, -1))
@@ -309,9 +319,12 @@ def run_training(
                         inp_shape = inp_shape[:-2]
                         inp_shape.append(-1)
 
-                        for t in range(initial_step, yy.shape[-2]):
+                        T = yy.shape[-2]
+                        for t in range(
+                            initial_step, T - prediction_step + 1, prediction_step
+                        ):
                             inp = xx.reshape(inp_shape)
-                            y = yy[..., t : t + 1, :]
+                            y = yy[..., t : t + prediction_step, :]
                             im = model(inp, grid)
                             _batch = im.size(0)
                             loss += loss_fn(
@@ -321,20 +334,24 @@ def run_training(
                             pred = torch.cat((pred, im), -2)
 
                             xx = torch.cat(
-                                (xx[..., 1:, :], im), dim=-2
+                                (xx[..., prediction_step:, :], im), dim=-2
                             )  # noqa: PLW2901
 
                         val_l2_step += loss.item()
                         _batch = yy.size(0)
+
                         _pred = pred[..., initial_step:t_train, :]
                         _yy = yy[..., initial_step:t_train, :]
+
+                        pred_len = _pred.shape[-2]
                         val_l2_full += loss_fn(
-                            _pred.reshape(_batch, -1), _yy.reshape(_batch, -1)
+                            _pred.reshape(_batch, -1),
+                            _yy[..., :pred_len, :].reshape(_batch, -1),
                         ).item()
 
                     if training_type in ["single"]:
                         x = xx[..., 0, :]
-                        y = yy[..., t_train - 1 : t_train, :]
+                        y = yy[..., t_train - prediction_step : t_train, :]
                         pred = model(x, grid)
                         _batch = yy.size(0)
                         loss += loss_fn(pred.reshape(_batch, -1), y.reshape(_batch, -1))

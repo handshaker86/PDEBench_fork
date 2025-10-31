@@ -4,6 +4,7 @@ continue_training: False
 num_workers: 2
 batch_size: 100
 initial_step: 10
+prediction_step: 10 
 t_train: 100
 model_update: 2
 filename: "1D_CFD_periodic_Train.hdf5"
