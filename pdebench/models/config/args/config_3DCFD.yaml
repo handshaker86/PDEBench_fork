@@ -22,3 +22,4 @@ width: 20
 scheduler_step: 100
 scheduler_gamma: 0.5
 initial_step: 10 # should be the same value to unroll_step ??
+prediction_step: 10 

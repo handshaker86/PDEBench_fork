@@ -325,17 +325,16 @@ def metrics(
     t_max,
     mode="FNO",
     initial_step=None,
+    prediction_step=None,  
     result_save_path=None,
     warmup_runs: int = 5,
     average_runs: int = 10,
 ):
-
     num_runs = max(1, average_runs)
     all_total_times = []
 
     if mode == "Unet":
         with torch.no_grad():
-
             # inference warm-up
             print("Warming up GPU...")
             for _ in range(warmup_runs):
@@ -367,7 +366,8 @@ def metrics(
                     torch.cuda.synchronize()
                     start_time = time.perf_counter()
 
-                    for t in range(initial_step, yy.shape[-2]):
+                    T = yy.shape[-2]
+                    for t in range(initial_step, T - prediction_step + 1, prediction_step):
                         inp = xx.reshape(inp_shape)
                         shape = [0, -1]
                         shape.extend(list(range(1, len(inp.shape) - 1)))
@@ -377,12 +377,16 @@ def metrics(
                         shape.append(1)
                         im = model(inp).permute(shape).unsqueeze(-2)
                         pred = torch.cat((pred, im), -2)
-                        xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                        xx = torch.cat((xx[..., prediction_step:, :], im), dim=-2)  # noqa: PLW2901
 
                     torch.cuda.synchronize()
                     end_time = time.perf_counter()
                     num_frames = yy.shape[-2] - initial_step
                     prediction_time = end_time - start_time
+
+                    pred_len = pred.shape[-2]
+                    _pred_truncated = pred[..., initial_step:pred_len, :]
+                    _yy_truncated = yy[..., initial_step:pred_len, :]
 
                     (
                         _err_RMSE,
@@ -392,8 +396,8 @@ def metrics(
                         _err_BD,
                         _err_F,
                     ) = metric_func(
-                        pred[..., initial_step:, :],
-                        yy[..., initial_step:, :],
+                        _pred_truncated, 
+                        _yy_truncated,   
                         if_mean=True,
                         Lx=Lx,
                         Ly=Ly,
@@ -427,16 +431,20 @@ def metrics(
                         mean_dim = list(range(len(yy.shape) - 2))
                         mean_dim.append(-1)
                         mean_dim = tuple(mean_dim)
-                        val_l2_time += torch.sqrt(
-                            torch.mean((pred - yy) ** 2, dim=mean_dim)
+                        
+                        pred_len = pred.shape[-2]
+                        _yy_truncated_full = yy[..., :pred_len, :]
+                        _val_l2_per_step = torch.sqrt(
+                            torch.mean((pred - _yy_truncated_full) ** 2, dim=mean_dim)
                         )
+                        val_l2_time[:pred_len] += _val_l2_per_step
+                        
                 all_total_times.append(total_time)
 
             total_time = sum(all_total_times) / len(all_total_times)
 
     elif mode == "FNO":
         with torch.no_grad():
-
             # inference warm-up
             print("Warming up GPU...")
             for _ in range(warmup_runs):
@@ -466,16 +474,22 @@ def metrics(
 
                     torch.cuda.synchronize()
                     start_time = time.perf_counter()
-                    for t in range(initial_step, yy.shape[-2]):
+                    
+                    T = yy.shape[-2]
+                    for t in range(initial_step, T - prediction_step + 1, prediction_step):
                         inp = xx.reshape(inp_shape)
-                        im = model(inp, grid)
+                        im = model(inp, grid) 
                         pred = torch.cat((pred, im), -2)
-                        xx = torch.cat((xx[..., 1:, :], im), dim=-2)  # noqa: PLW2901
+                        xx = torch.cat((xx[..., prediction_step:, :], im), dim=-2)  # noqa: PLW2901
 
                     torch.cuda.synchronize()
                     end_time = time.perf_counter()
                     num_frames = yy.shape[-2] - initial_step
                     prediction_time = end_time - start_time
+
+                    pred_len = pred.shape[-2]
+                    _pred_truncated = pred[..., initial_step:pred_len, :]
+                    _yy_truncated = yy[..., initial_step:pred_len, :]
 
                     (
                         _err_RMSE,
@@ -485,8 +499,8 @@ def metrics(
                         _err_BD,
                         _err_F,
                     ) = metric_func(
-                        pred[..., initial_step:, :],
-                        yy[..., initial_step:, :],
+                        _pred_truncated, 
+                        _yy_truncated,   
                         if_mean=True,
                         Lx=Lx,
                         Ly=Ly,
@@ -520,9 +534,14 @@ def metrics(
                         mean_dim = list(range(len(yy.shape) - 2))
                         mean_dim.append(-1)
                         mean_dim = tuple(mean_dim)
-                        val_l2_time += torch.sqrt(
-                            torch.mean((pred - yy) ** 2, dim=mean_dim)
+
+                        pred_len = pred.shape[-2]
+                        _yy_truncated_full = yy[..., :pred_len, :]
+                        _val_l2_per_step = torch.sqrt(
+                            torch.mean((pred - _yy_truncated_full) ** 2, dim=mean_dim)
                         )
+                        val_l2_time[:pred_len] += _val_l2_per_step
+
                 all_total_times.append(total_time)
 
             total_time = sum(all_total_times) / len(all_total_times)
