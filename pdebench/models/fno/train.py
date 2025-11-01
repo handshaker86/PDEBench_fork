@@ -131,6 +131,7 @@ def run_training(
             width=width,
             modes=modes,
             initial_step=initial_step,
+            prediction_step=prediction_step,
         ).to(device)
     elif dimensions == 5:
         model = FNO2d(
@@ -139,6 +140,7 @@ def run_training(
             modes1=modes,
             modes2=modes,
             initial_step=initial_step,
+            prediction_step=prediction_step,
         ).to(device)
     elif dimensions == 6:
         model = FNO3d(
@@ -148,6 +150,7 @@ def run_training(
             modes2=modes,
             modes3=modes,
             initial_step=initial_step,
+            prediction_step=prediction_step,
         ).to(device)
 
     # Set maximum time step of the data to train
