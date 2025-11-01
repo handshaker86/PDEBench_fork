@@ -80,28 +80,18 @@ class SpectralConv1d(nn.Module):
 
 
 class FNO1d(nn.Module):
-    def __init__(self, num_channels, modes=16, width=64, initial_step=10):
+    def __init__(self, num_channels, modes=16, width=64, initial_step=10, prediction_step=1): 
         super().__init__()
-
-        """
-        The overall network. It contains 4 layers of the Fourier layer.
-        1. Lift the input to the desire channel dimension by self.fc0 .
-        2. 4 layers of the integral operators u' = (W + K)(u).
-            W defined by self.w; K defined by self.conv .
-        3. Project from the channel space to the output space by self.fc1 and self.fc2 .
-
-        input: the solution of the initial condition and location (a(x), x)
-        input shape: (batchsize, x=s, c=2)
-        output: the solution of a later timestep
-        output shape: (batchsize, x=s, c=1)
-        """
-
+        
         self.modes1 = modes
         self.width = width
         self.padding = 2  # pad the domain if input is non-periodic
         self.fc0 = nn.Linear(
             initial_step * num_channels + 1, self.width
         )  # input channel is 2: (a(x), x)
+
+        self.num_channels = num_channels       
+        self.prediction_step = prediction_step 
 
         self.conv0 = SpectralConv1d(self.width, self.width, self.modes1)
         self.conv1 = SpectralConv1d(self.width, self.width, self.modes1)
@@ -113,8 +103,8 @@ class FNO1d(nn.Module):
         self.w3 = nn.Conv1d(self.width, self.width, 1)
 
         self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, num_channels)
-
+        self.fc2 = nn.Linear(128, prediction_step * num_channels) 
+    
     def forward(self, x, grid):
         # x dim = [b, x1, t*v]
         x = torch.cat((x, grid), dim=-1)
@@ -148,7 +138,11 @@ class FNO1d(nn.Module):
         x = self.fc1(x)
         x = F.gelu(x)
         x = self.fc2(x)
-        return x.unsqueeze(-2)
+
+        batch_size = x.shape[0]
+        spatial_size = x.shape[1]
+        x = x.view(batch_size, spatial_size, self.prediction_step, self.num_channels)
+        return x
 
 
 class SpectralConv2d_fast(nn.Module):
@@ -212,28 +206,18 @@ class SpectralConv2d_fast(nn.Module):
 
 
 class FNO2d(nn.Module):
-    def __init__(self, num_channels, modes1=12, modes2=12, width=20, initial_step=10):
+    def __init__(self, num_channels, modes1=12, modes2=12, width=20, initial_step=10, prediction_step=1): 
         super().__init__()
-
-        """
-        The overall network. It contains 4 layers of the Fourier layer.
-        1. Lift the input to the desire channel dimension by self.fc0 .
-        2. 4 layers of the integral operators u' = (W + K)(u).
-            W defined by self.w; K defined by self.conv .
-        3. Project from the channel space to the output space by self.fc1 and self.fc2 .
-
-        input: the solution of the previous 10 timesteps + 2 locations (u(t-10, x, y), ..., u(t-1, x, y),  x, y)
-        input shape: (batchsize, x, y, c)
-        output: the solution of the next timestep
-        output shape: (batchsize, x, y, c)
-        """
-
+        
         self.modes1 = modes1
         self.modes2 = modes2
         self.width = width
         self.padding = 2  # pad the domain if input is non-periodic
         self.fc0 = nn.Linear(initial_step * num_channels + 2, self.width)
         # input channel is 12: the solution of the previous 10 timesteps + 2 locations (u(t-10, x, y), ..., u(t-1, x, y),  x, y)
+
+        self.num_channels = num_channels       
+        self.prediction_step = prediction_step 
 
         self.conv0 = SpectralConv2d_fast(
             self.width, self.width, self.modes1, self.modes2
@@ -253,7 +237,7 @@ class FNO2d(nn.Module):
         self.w3 = nn.Conv2d(self.width, self.width, 1)
 
         self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, num_channels)
+        self.fc2 = nn.Linear(128, prediction_step * num_channels) 
 
     def forward(self, x, grid):
         # x dim = [b, x1, x2, t*v]
@@ -289,7 +273,11 @@ class FNO2d(nn.Module):
         x = F.gelu(x)
         x = self.fc2(x)
 
-        return x.unsqueeze(-2)
+        batch_size = x.shape[0]
+        spatial_size_1 = x.shape[1]
+        spatial_size_2 = x.shape[2]
+        x = x.view(batch_size, spatial_size_1, spatial_size_2, self.prediction_step, self.num_channels)
+        return x
 
 
 class SpectralConv3d(nn.Module):
@@ -394,7 +382,7 @@ class SpectralConv3d(nn.Module):
 
 class FNO3d(nn.Module):
     def __init__(
-        self, num_channels, modes1=8, modes2=8, modes3=8, width=20, initial_step=10
+        self, num_channels, modes1=8, modes2=8, modes3=8, width=20, initial_step=10, prediction_step=1 
     ):
         super().__init__()
 
@@ -419,6 +407,9 @@ class FNO3d(nn.Module):
         self.fc0 = nn.Linear(initial_step * num_channels + 3, self.width)
         # input channel is 12: the solution of the first 10 timesteps + 3 locations (u(1, x, y), ..., u(10, x, y),  x, y, t)
 
+        self.num_channels = num_channels       
+        self.prediction_step = prediction_step 
+
         self.conv0 = SpectralConv3d(
             self.width, self.width, self.modes1, self.modes2, self.modes3
         )
@@ -441,7 +432,7 @@ class FNO3d(nn.Module):
         self.bn3 = torch.nn.BatchNorm3d(self.width)
 
         self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, num_channels)
+        self.fc2 = nn.Linear(128, prediction_step * num_channels) 
 
     def forward(self, x, grid):
         # x dim = [b, x1, x2, x3, t*v]
@@ -476,4 +467,10 @@ class FNO3d(nn.Module):
         x = self.fc1(x)
         x = F.gelu(x)
         x = self.fc2(x)
-        return x.unsqueeze(-2)
+        
+        batch_size = x.shape[0]
+        spatial_size_1 = x.shape[1]
+        spatial_size_2 = x.shape[2]
+        spatial_size_3 = x.shape[3]
+        x = x.view(batch_size, spatial_size_1, spatial_size_2, spatial_size_3, self.prediction_step, self.num_channels)
+        return x
