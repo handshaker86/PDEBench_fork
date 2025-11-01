@@ -26,10 +26,17 @@ from torch import nn
 
 
 class UNet1d(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, init_features=32):
+    def __init__(
+        self, in_channels=3, out_channels=1, init_features=32, prediction_step=1
+    ):
         super().__init__()
 
         features = init_features
+
+        self.out_channels = out_channels
+        self.prediction_step = prediction_step
+        final_out_channels = out_channels * prediction_step
+
         self.encoder1 = UNet1d._block(in_channels, features, name="enc1")
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
         self.encoder2 = UNet1d._block(features, features * 2, name="enc2")
@@ -59,7 +66,9 @@ class UNet1d(nn.Module):
         self.decoder1 = UNet1d._block(features * 2, features, name="dec1")
 
         self.conv = nn.Conv1d(
-            in_channels=features, out_channels=out_channels, kernel_size=1
+            in_channels=features,
+            out_channels=final_out_channels,
+            kernel_size=1,
         )
 
     def forward(self, x):
@@ -82,7 +91,15 @@ class UNet1d(nn.Module):
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        return self.conv(dec1)
+
+        x = self.conv(dec1)  # x shape: [B, T_pred*V, L]
+
+        x = x.permute(0, 2, 1)
+        # [B, L, T_pred, V]
+        batch_size = x.shape[0]
+        spatial_size = x.shape[1]
+        x = x.view(batch_size, spatial_size, self.prediction_step, self.out_channels)
+        return x
 
     @staticmethod
     def _block(in_channels, features, name):
@@ -119,10 +136,17 @@ class UNet1d(nn.Module):
 
 
 class UNet2d(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, init_features=32):
+    def __init__(
+        self, in_channels=3, out_channels=1, init_features=32, prediction_step=1
+    ):
         super().__init__()
 
         features = init_features
+
+        self.out_channels = out_channels
+        self.prediction_step = prediction_step
+        final_out_channels = out_channels * prediction_step
+
         self.encoder1 = UNet2d._block(in_channels, features, name="enc1")
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.encoder2 = UNet2d._block(features, features * 2, name="enc2")
@@ -152,7 +176,9 @@ class UNet2d(nn.Module):
         self.decoder1 = UNet2d._block(features * 2, features, name="dec1")
 
         self.conv = nn.Conv2d(
-            in_channels=features, out_channels=out_channels, kernel_size=1
+            in_channels=features,
+            out_channels=final_out_channels,
+            kernel_size=1,
         )
 
     def forward(self, x):
@@ -175,7 +201,22 @@ class UNet2d(nn.Module):
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        return self.conv(dec1)
+
+        x = self.conv(dec1)  # x shape: [B, T_pred*V, H, W]
+
+        x = x.permute(0, 2, 3, 1)
+        # [B, H, W, T_pred, V]
+        batch_size = x.shape[0]
+        spatial_size_1 = x.shape[1]
+        spatial_size_2 = x.shape[2]
+        x = x.view(
+            batch_size,
+            spatial_size_1,
+            spatial_size_2,
+            self.prediction_step,
+            self.out_channels,
+        )
+        return x
 
     @staticmethod
     def _block(in_channels, features, name):
@@ -212,10 +253,17 @@ class UNet2d(nn.Module):
 
 
 class UNet3d(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, init_features=32):
+    def __init__(
+        self, in_channels=3, out_channels=1, init_features=32, prediction_step=1
+    ):
         super().__init__()
 
         features = init_features
+
+        self.out_channels = out_channels
+        self.prediction_step = prediction_step
+        final_out_channels = out_channels * prediction_step
+
         self.encoder1 = UNet3d._block(in_channels, features, name="enc1")
         self.pool1 = nn.MaxPool3d(kernel_size=2, stride=2)
         self.encoder2 = UNet3d._block(features, features * 2, name="enc2")
@@ -245,7 +293,9 @@ class UNet3d(nn.Module):
         self.decoder1 = UNet3d._block(features * 2, features, name="dec1")
 
         self.conv = nn.Conv3d(
-            in_channels=features, out_channels=out_channels, kernel_size=1
+            in_channels=features,
+            out_channels=final_out_channels,
+            kernel_size=1,
         )
 
     def forward(self, x):
@@ -268,7 +318,24 @@ class UNet3d(nn.Module):
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        return self.conv(dec1)
+
+        x = self.conv(dec1)  # x shape: [B, T_pred*V, D, H, W]
+
+        x = x.permute(0, 2, 3, 4, 1)
+        # [B, D, H, W, T_pred, V]
+        batch_size = x.shape[0]
+        spatial_size_1 = x.shape[1]
+        spatial_size_2 = x.shape[2]
+        spatial_size_3 = x.shape[3]
+        x = x.view(
+            batch_size,
+            spatial_size_1,
+            spatial_size_2,
+            spatial_size_3,
+            self.prediction_step,
+            self.out_channels,
+        )
+        return x
 
     @staticmethod
     def _block(in_channels, features, name):

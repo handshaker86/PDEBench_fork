@@ -25,6 +25,7 @@ def run_training(
     num_workers,
     initial_step,
     t_train,
+    prediction_step,
     in_channels,
     out_channels,
     batch_size,
@@ -125,18 +126,36 @@ def run_training(
     print(msg)
     if training_type in ["autoregressive"]:
         if dimensions == 4:
-            model = UNet1d(in_channels * initial_step, out_channels).to(device)
+            model = UNet1d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
         elif dimensions == 5:
-            model = UNet2d(in_channels * initial_step, out_channels).to(device)
+            model = UNet2d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
         elif dimensions == 6:
-            model = UNet3d(in_channels * initial_step, out_channels).to(device)
+            model = UNet3d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
     if training_type in ["single"]:
         if dimensions == 4:
-            model = UNet1d(in_channels, out_channels).to(device)
+            model = UNet1d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
         elif dimensions == 5:
-            model = UNet2d(in_channels, out_channels).to(device)
+            model = UNet2d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
         elif dimensions == 6:
-            model = UNet3d(in_channels, out_channels).to(device)
+            model = UNet3d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
 
     # Set maximum time step of the data to train
     t_train = min(t_train, _data.shape[-2])
@@ -174,7 +193,7 @@ def run_training(
     start_epoch = 0
 
     if not if_training:
-        checkpoint = torch.load(model_path, map_location=device,weights_only=True)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
         model.eval()
@@ -196,6 +215,7 @@ def run_training(
             t_max,
             mode="Unet",
             initial_step=initial_step,
+            prediction_step=prediction_step,
             result_save_path=result_save_path,
         )
 
@@ -255,7 +275,9 @@ def run_training(
                     inp_shape.append(-1)
 
                     # Autoregressive loop
-                    for t in range(initial_step, t_train):
+                    for t in range(
+                        initial_step, t_train - prediction_step + 1, prediction_step
+                    ):
                         if t < t_train - unroll_step:
                             with torch.no_grad():
                                 # Reshape input tensor into [b, x1, ..., xd, t_init*v]
@@ -265,13 +287,10 @@ def run_training(
                                 inp = inp.permute(temp_shape)
 
                                 # Extract target at current time step
-                                y = yy_tensor[..., t : t + 1, :]
+                                y = yy_tensor[..., t : t + prediction_step, :]
 
                                 # Model run
-                                temp_shape = [0]
-                                temp_shape.extend(list(range(2, len(inp.shape))))
-                                temp_shape.append(1)
-                                im = model(inp).permute(temp_shape).unsqueeze(-2)
+                                im = model(inp)
 
                                 # Concatenate the prediction at current time step into the
                                 # prediction tensor
@@ -280,7 +299,8 @@ def run_training(
                                 # Concatenate the prediction at the current time step to be used
                                 # as input for the next time step
                                 xx_tensor = torch.cat(
-                                    (xx_tensor[..., 1:, :], im), dim=-2
+                                    (xx_tensor[..., prediction_step:, :], im),
+                                    dim=-2,
                                 )
 
                         else:
@@ -291,13 +311,10 @@ def run_training(
                             inp = inp.permute(temp_shape)
 
                             # Extract target at current time step
-                            y = yy_tensor[..., t : t + 1, :]
+                            y = yy_tensor[..., t : t + prediction_step, :]
 
                             # Model run
-                            temp_shape = [0]
-                            temp_shape.extend(list(range(2, len(inp.shape))))
-                            temp_shape.append(1)
-                            im = model(inp).permute(temp_shape).unsqueeze(-2)
+                            im = model(inp)
 
                             # Loss calculation
                             loss += loss_fn(
@@ -310,31 +327,38 @@ def run_training(
 
                             # Concatenate the prediction at the current time step to be used
                             # as input for the next time step
-                            xx_tensor = torch.cat((xx_tensor[..., 1:, :], im), dim=-2)
+                            xx_tensor = torch.cat(
+                                (xx_tensor[..., prediction_step:, :], im), dim=-2
+                            )
 
                     train_l2_step += loss.item()
                     _batch = yy_tensor.size(0)
                     _yy = yy_tensor[..., :t_train, :]
-                    l2_full = loss_fn(pred.reshape(_batch, -1), _yy.reshape(_batch, -1))
+
+                    pred_len = pred.shape[-2]
+                    l2_full = loss_fn(
+                        pred.reshape(_batch, -1),
+                        _yy[..., :pred_len, :].reshape(_batch, -1),
+                    )
                     train_l2_full += l2_full.item()
 
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
-            if training_type in ["single"]:
-                x = xx[..., 0, :]
-                y = yy[..., t_train - 1 : t_train, :]
-                pred = model(x.permute([0, 2, 1])).permute([0, 2, 1])
-                _batch = yy.size(0)
-                loss += loss_fn(pred.reshape(_batch, -1), y.reshape(_batch, -1))
+                if training_type in ["single"]:
+                    x = xx[..., 0, :]
+                    y = yy[..., t_train - prediction_step : t_train, :]
+                    pred = model(x.permute([0, 2, 1]))
+                    _batch = yy.size(0)
+                    loss += loss_fn(pred.reshape(_batch, -1), y.reshape(_batch, -1))
 
-                train_l2_step += loss.item()
-                train_l2_full += loss.item()
+                    train_l2_step += loss.item()
+                    train_l2_full += loss.item()
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
             if ep % model_update == 0:
                 val_l2_step = 0
@@ -351,16 +375,21 @@ def run_training(
                             inp_shape = inp_shape[:-2]
                             inp_shape.append(-1)
 
-                            for t in range(initial_step, t_train):
+                            T_val = yy_tensor.shape[-2]
+                            for t in range(
+                                initial_step,
+                                T_val - prediction_step + 1,
+                                prediction_step,
+                            ):
                                 inp = xx_tensor.reshape(inp_shape)
                                 temp_shape = [0, -1]
                                 temp_shape.extend(list(range(1, len(inp.shape) - 1)))
                                 inp = inp.permute(temp_shape)
-                                y = yy_tensor[..., t : t + 1, :]
-                                temp_shape = [0]
-                                temp_shape.extend(list(range(2, len(inp.shape))))
-                                temp_shape.append(1)
-                                im = model(inp).permute(temp_shape).unsqueeze(-2)
+
+                                y = yy_tensor[..., t : t + prediction_step, :]
+
+                                im = model(inp)
+
                                 loss += loss_fn(
                                     im.reshape(batch_size, -1),
                                     y.reshape(batch_size, -1),
@@ -369,38 +398,45 @@ def run_training(
                                 pred = torch.cat((pred, im), -2)
 
                                 xx_tensor = torch.cat(
-                                    (xx_tensor[..., 1:, :], im), dim=-2
+                                    (xx_tensor[..., prediction_step:, :], im),
+                                    dim=-2,
                                 )
 
                             val_l2_step += loss.item()
                             _batch = yy.size(0)
+
                             _pred = pred[..., initial_step:t_train, :]
                             _yy = yy_tensor[..., initial_step:t_train, :]
+
+                            pred_len = _pred.shape[-2]
                             val_l2_full += loss_fn(
-                                _pred.reshape(_batch, -1), _yy.reshape(_batch, -1)
+                                _pred.reshape(_batch, -1),
+                                _yy[..., :pred_len, :].reshape(_batch, -1),
                             ).item()
 
-                    if training_type in ["single"]:
-                        x = xx[..., 0, :]
-                        y = yy[..., t_train - 1 : t_train, :]
-                        pred = model(x.permute([0, 2, 1])).permute([0, 2, 1])
-                        _batch = yy.size(0)
-                        loss += loss_fn(pred.reshape(_batch, -1), y.reshape(_batch, -1))
+                        if training_type in ["single"]:
+                            x = xx[..., 0, :]
+                            y = yy[..., t_train - prediction_step : t_train, :]
+                            pred = model(x.permute([0, 2, 1]))
+                            _batch = yy.size(0)
+                            loss += loss_fn(
+                                pred.reshape(_batch, -1), y.reshape(_batch, -1)
+                            )
 
-                        val_l2_step += loss.item()
-                        val_l2_full += loss.item()
+                            val_l2_step += loss.item()
+                            val_l2_full += loss.item()
 
-                    if val_l2_full < loss_val_min:
-                        loss_val_min = val_l2_full
-                        torch.save(
-                            {
-                                "epoch": ep,
-                                "model_state_dict": model.state_dict(),
-                                "optimizer_state_dict": optimizer.state_dict(),
-                                "loss": loss_val_min,
-                            },
-                            model_path,
-                        )
+                        if val_l2_full < loss_val_min:
+                            loss_val_min = val_l2_full
+                            torch.save(
+                                {
+                                    "epoch": ep,
+                                    "model_state_dict": model.state_dict(),
+                                    "optimizer_state_dict": optimizer.state_dict(),
+                                    "loss": loss_val_min,
+                                },
+                                model_path,
+                            )
 
             t2 = default_timer()
             scheduler.step()
@@ -417,37 +453,33 @@ def run_training(
             for xx, yy in train_loader:
                 loss = 0
 
-                # xx: input tensor (first few time steps) [b, x1, ..., xd, t_init, v]
-                # yy: target tensor [b, x1, ..., xd, t, v]
                 xx_tensor = xx.to(device)
                 yy_tensor = yy.to(device)
 
                 # Initialize the prediction tensor
                 pred = yy_tensor[..., :initial_step, :]
 
-                # Extract shape of the input tensor for reshaping (i.e. stacking the
-                # time and channels dimension together)
                 inp_shape = list(xx_tensor.shape)
                 inp_shape = inp_shape[:-2]
                 inp_shape.append(-1)
 
                 # Autoregressive loop
-                for t in range(initial_step, t_train):
+                for t in range(
+                    initial_step, t_train - prediction_step + 1, prediction_step
+                ):
                     # Reshape input tensor into [b, x1, ..., xd, t_init*v]
                     inp = yy_tensor[..., t - initial_step : t, :].reshape(inp_shape)
+
                     temp_shape = [0, -1]
                     temp_shape.extend(list(range(1, len(inp.shape) - 1)))
                     inp = inp.permute(temp_shape)
                     inp = torch.normal(inp, 0.001)
 
                     # Extract target at current time step
-                    y = yy_tensor[..., t : t + 1, :]
+                    y = yy_tensor[..., t : t + prediction_step, :]
 
                     # Model run
-                    temp_shape = [0]
-                    temp_shape.extend(list(range(2, len(inp.shape))))
-                    temp_shape.append(1)
-                    im = model(inp).permute(temp_shape).unsqueeze(-2)
+                    im = model(inp)
 
                     # Loss calculation
                     loss += loss_fn(
@@ -458,14 +490,14 @@ def run_training(
                     # prediction tensor
                     pred = torch.cat((pred, im), -2)
 
-                    # Concatenate the prediction at the current time step to be used
-                    # as input for the next time step
-                    # xx = torch.cat((xx[..., 1:, :], im), dim=-2)
-
                 train_l2_step += loss.item()
                 _batch = yy.size(0)
                 _yy = yy_tensor[..., :t_train, :]  # if t_train is not -1
-                l2_full = loss_fn(pred.reshape(_batch, -1), _yy.reshape(_batch, -1))
+
+                pred_len = pred.shape[-2]
+                l2_full = loss_fn(
+                    pred.reshape(_batch, -1), _yy[..., :pred_len, :].reshape(_batch, -1)
+                )
                 train_l2_full += l2_full.item()
 
                 optimizer.zero_grad()
@@ -486,18 +518,21 @@ def run_training(
                         inp_shape = inp_shape[:-2]
                         inp_shape.append(-1)
 
-                        for t in range(initial_step, t_train):
+                        T_val = yy_tensor.shape[-2]
+                        for t in range(
+                            initial_step, T_val - prediction_step + 1, prediction_step
+                        ):
                             inp = yy_tensor[..., t - initial_step : t, :].reshape(
                                 inp_shape
                             )
                             temp_shape = [0, -1]
                             temp_shape.extend(list(range(1, len(inp.shape) - 1)))
                             inp = inp.permute(temp_shape)
-                            y = yy_tensor[..., t : t + 1, :]
-                            temp_shape = [0]
-                            temp_shape.extend(list(range(2, len(inp.shape))))
-                            temp_shape.append(1)
-                            im = model(inp).permute(temp_shape).unsqueeze(-2)
+
+                            y = yy_tensor[..., t : t + prediction_step, :]
+
+                            im = model(inp)
+
                             loss += loss_fn(
                                 im.reshape(batch_size, -1), y.reshape(batch_size, -1)
                             )
@@ -506,11 +541,14 @@ def run_training(
 
                         val_l2_step += loss.item()
                         _batch = yy.size(0)
+
                         _pred = pred[..., initial_step:t_train, :]
-                        # if t_train is not -1
                         _yy = yy_tensor[..., initial_step:t_train, :]
+
+                        pred_len = _pred.shape[-2]
                         val_l2_full += loss_fn(
-                            _pred.reshape(_batch, -1), _yy.reshape(_batch, -1)
+                            _pred.reshape(_batch, -1),
+                            _yy[..., :pred_len, :].reshape(_batch, -1),
                         ).item()
 
                     if val_l2_full < loss_val_min:
