@@ -173,8 +173,6 @@ def metric_func(
     pred, target = pred.to(device), target.to(device)
     # (batch, nx^i..., timesteps, nc)
     # slice out `initial context` timesteps
-    pred = pred[..., initial_step:, :]
-    target = target[..., initial_step:, :]
     idxs = target.size()
     if len(idxs) == 4:  # 1D
         pred = pred.permute(0, 3, 1, 2)
@@ -325,7 +323,7 @@ def metrics(
     t_max,
     mode="FNO",
     initial_step=None,
-    prediction_step=None,  
+    prediction_step=None,
     result_save_path=None,
     warmup_runs: int = 5,
     average_runs: int = 10,
@@ -367,7 +365,7 @@ def metrics(
                     start_time = time.perf_counter()
 
                     T = yy.shape[-2]
-                    for t in range(initial_step, T - prediction_step + 1, prediction_step):
+                    for t in range(initial_step, T, prediction_step):
                         inp = xx.reshape(inp_shape)
                         shape = [0, -1]
                         shape.extend(list(range(1, len(inp.shape) - 1)))
@@ -377,14 +375,16 @@ def metrics(
                         shape.append(1)
                         im = model(inp).permute(shape).unsqueeze(-2)
                         pred = torch.cat((pred, im), -2)
-                        xx = torch.cat((xx[..., prediction_step:, :], im), dim=-2)  # noqa: PLW2901
+                        xx = torch.cat(
+                            (xx[..., prediction_step:, :], im), dim=-2
+                        )  # noqa: PLW2901
 
                     torch.cuda.synchronize()
                     end_time = time.perf_counter()
                     num_frames = yy.shape[-2] - initial_step
                     prediction_time = end_time - start_time
 
-                    pred_len = pred.shape[-2]
+                    pred_len = min(pred.shape[-2], T)
                     _pred_truncated = pred[..., initial_step:pred_len, :]
                     _yy_truncated = yy[..., initial_step:pred_len, :]
 
@@ -396,8 +396,8 @@ def metrics(
                         _err_BD,
                         _err_F,
                     ) = metric_func(
-                        _pred_truncated, 
-                        _yy_truncated,   
+                        _pred_truncated,
+                        _yy_truncated,
                         if_mean=True,
                         Lx=Lx,
                         Ly=Ly,
@@ -431,14 +431,14 @@ def metrics(
                         mean_dim = list(range(len(yy.shape) - 2))
                         mean_dim.append(-1)
                         mean_dim = tuple(mean_dim)
-                        
-                        pred_len = pred.shape[-2]
-                        _yy_truncated_full = yy[..., :pred_len, :]
+
                         _val_l2_per_step = torch.sqrt(
-                            torch.mean((pred - _yy_truncated_full) ** 2, dim=mean_dim)
+                            torch.mean(
+                                (_pred_truncated - _yy_truncated) ** 2, dim=mean_dim
+                            )
                         )
-                        val_l2_time[:pred_len] += _val_l2_per_step
-                        
+                        val_l2_time[: (pred_len - initial_step)] += _val_l2_per_step
+
                 all_total_times.append(total_time)
 
             total_time = sum(all_total_times) / len(all_total_times)
@@ -474,20 +474,22 @@ def metrics(
 
                     torch.cuda.synchronize()
                     start_time = time.perf_counter()
-                    
+
                     T = yy.shape[-2]
-                    for t in range(initial_step, T - prediction_step + 1, prediction_step):
+                    for t in range(initial_step, T, prediction_step):
                         inp = xx.reshape(inp_shape)
-                        im = model(inp, grid) 
+                        im = model(inp, grid)
                         pred = torch.cat((pred, im), -2)
-                        xx = torch.cat((xx[..., prediction_step:, :], im), dim=-2)  # noqa: PLW2901
+                        xx = torch.cat(
+                            (xx[..., prediction_step:, :], im), dim=-2
+                        )  # noqa: PLW2901
 
                     torch.cuda.synchronize()
                     end_time = time.perf_counter()
                     num_frames = yy.shape[-2] - initial_step
                     prediction_time = end_time - start_time
 
-                    pred_len = pred.shape[-2]
+                    pred_len = min(pred.shape[-2], T)
                     _pred_truncated = pred[..., initial_step:pred_len, :]
                     _yy_truncated = yy[..., initial_step:pred_len, :]
 
@@ -499,8 +501,8 @@ def metrics(
                         _err_BD,
                         _err_F,
                     ) = metric_func(
-                        _pred_truncated, 
-                        _yy_truncated,   
+                        _pred_truncated,
+                        _yy_truncated,
                         if_mean=True,
                         Lx=Lx,
                         Ly=Ly,
@@ -535,12 +537,12 @@ def metrics(
                         mean_dim.append(-1)
                         mean_dim = tuple(mean_dim)
 
-                        pred_len = pred.shape[-2]
-                        _yy_truncated_full = yy[..., :pred_len, :]
                         _val_l2_per_step = torch.sqrt(
-                            torch.mean((pred - _yy_truncated_full) ** 2, dim=mean_dim)
+                            torch.mean(
+                                (_pred_truncated - _yy_truncated) ** 2, dim=mean_dim
+                            )
                         )
-                        val_l2_time[:pred_len] += _val_l2_per_step
+                        val_l2_time[: (pred_len - initial_step)] += _val_l2_per_step
 
                 all_total_times.append(total_time)
 
