@@ -373,7 +373,7 @@ def metrics(
                         shape = [0]
                         shape.extend(list(range(2, len(inp.shape))))
                         shape.append(1)
-                        im = model(inp).permute(shape).unsqueeze(-2)
+                        im = model(inp)
                         pred = torch.cat((pred, im), -2)
                         xx = torch.cat(
                             (xx[..., prediction_step:, :], im), dim=-2
