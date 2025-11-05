@@ -208,7 +208,7 @@ def main(cfg: DictConfig):
             prediction_step=cfg.args.prediction_step,
             t_train=cfg.args.t_train,
             in_channels=cfg.args.in_channels,
-            out_channels=cfg.args.out_channels+cfg.args.prediction_step,
+            out_channels=cfg.args.out_channels,
             epochs=cfg.args.epochs,
             learning_rate=cfg.args.learning_rate,
             batch_size=cfg.args.batch_size,
