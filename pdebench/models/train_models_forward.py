@@ -149,15 +149,339 @@ arrangements between the parties relating hereto.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 
 import hydra
+import torch
 from omegaconf import DictConfig
 
+from pdebench.models.metrics import predict_time_benchmark, save_prediction_results
+
 logger = logging.getLogger(__name__)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def run_benchmark_FNO(
+    num_workers,
+    modes,
+    width,
+    initial_step,
+    prediction_step,
+    num_channels,
+    batch_size,
+    flnm,
+    single_file,
+    base_path,
+    model_save_path,
+    reduced_resolution,
+    reduced_resolution_t,
+    reduced_batch,
+    target_frames=100,
+    warmup_runs=5,
+    average_runs=10,
+):
+    """Load FNO model and run predict_time_benchmark."""
+    from pdebench.models.fno.fno import FNO1d, FNO2d, FNO3d
+    from pdebench.models.fno.utils import FNODatasetMult, FNODatasetSingle
+
+    if single_file:
+        model_name = flnm[:-5] + "_FNO"
+        val_data = FNODatasetSingle(
+            flnm,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            initial_step=initial_step,
+            if_test=True,
+            saved_folder=base_path,
+        )
+    else:
+        model_name = flnm + "_FNO"
+        val_data = FNODatasetMult(
+            flnm,
+            initial_step=initial_step,
+            saved_folder=base_path,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=True,
+        )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_data, batch_size=batch_size, num_workers=num_workers, shuffle=False
+    )
+
+    _, _data, _ = next(iter(val_loader))
+    dimensions = len(_data.shape)
+    if dimensions == 4:
+        model = FNO1d(
+            num_channels=num_channels,
+            width=width,
+            modes=modes,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+        ).to(device)
+    elif dimensions == 5:
+        model = FNO2d(
+            num_channels=num_channels,
+            width=width,
+            modes1=modes,
+            modes2=modes,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+        ).to(device)
+    elif dimensions == 6:
+        model = FNO3d(
+            num_channels=num_channels,
+            width=width,
+            modes1=modes,
+            modes2=modes,
+            modes3=modes,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+        ).to(device)
+
+    model_path = Path(model_save_path) / "FNO" / f"{model_name}.pt"
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {model_path}\n"
+            f"Please check if the model has been trained and saved at this path."
+        )
+    checkpoint = torch.load(str(model_path), map_location=device, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    data_name = os.path.splitext(flnm)[0]
+    avg_time_per_frame = predict_time_benchmark(
+        val_loader=val_loader,
+        model=model,
+        mode="FNO",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        target_frames=target_frames,
+        warmup_runs=warmup_runs,
+        average_runs=average_runs,
+        data_name=data_name,
+    )
+    save_path = save_prediction_results(
+        val_loader=val_loader,
+        model=model,
+        mode="FNO",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        model_name="FNO",
+        dataset_name=data_name,
+    )
+    if save_path:
+        logger.info(f"Prediction results saved to {save_path}")
+
+    return avg_time_per_frame
+
+
+def run_benchmark_Unet(
+    num_workers,
+    initial_step,
+    prediction_step,
+    in_channels,
+    out_channels,
+    batch_size,
+    flnm,
+    single_file,
+    base_path,
+    model_save_path,
+    reduced_resolution,
+    reduced_resolution_t,
+    reduced_batch,
+    training_type,
+    ar_mode=None,
+    pushforward=None,
+    unroll_step=None,
+    target_frames=100,
+    warmup_runs=5,
+    average_runs=10,
+):
+    """Load Unet model and run predict_time_benchmark."""
+    from pdebench.models.unet.unet import UNet1d, UNet2d, UNet3d
+    from pdebench.models.unet.utils import UNetDatasetMult, UNetDatasetSingle
+
+    if single_file:
+        model_name = flnm[:-5] + "_Unet"
+        val_data = UNetDatasetSingle(
+            flnm,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=True,
+            saved_folder=base_path,
+            initial_step=initial_step,
+        )
+    else:
+        model_name = flnm + "_Unet"
+        val_data = UNetDatasetMult(
+            flnm,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=True,
+            saved_folder=base_path,
+            initial_step=initial_step,
+        )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_data, batch_size=batch_size, num_workers=num_workers, shuffle=False
+    )
+
+    _, _data = next(iter(val_loader))
+    dimensions = len(_data.shape)
+
+    if training_type in ["autoregressive"]:
+        if ar_mode:
+            if pushforward and unroll_step is not None:
+                model_name = model_name + "-PF-" + str(unroll_step)
+            elif not pushforward:
+                model_name = model_name + "-AR"
+        else:
+            model_name = model_name + "-1-step"
+
+    if training_type in ["autoregressive"]:
+        if dimensions == 4:
+            model = UNet1d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
+        elif dimensions == 5:
+            model = UNet2d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
+        elif dimensions == 6:
+            model = UNet3d(
+                in_channels * initial_step,
+                out_channels,
+                prediction_step=prediction_step,
+            ).to(device)
+    if training_type in ["single"]:
+        if dimensions == 4:
+            model = UNet1d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
+        elif dimensions == 5:
+            model = UNet2d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
+        elif dimensions == 6:
+            model = UNet3d(
+                in_channels, out_channels, prediction_step=prediction_step
+            ).to(device)
+
+    model_path = Path(model_save_path) / "Unet" / f"{model_name}.pt"
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {model_path}\n"
+            f"Please check if the model has been trained and saved at this path."
+        )
+    checkpoint = torch.load(str(model_path), map_location=device, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    data_name = os.path.splitext(flnm)[0]
+    avg_time_per_frame = predict_time_benchmark(
+        val_loader=val_loader,
+        model=model,
+        mode="Unet",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        target_frames=target_frames,
+        warmup_runs=warmup_runs,
+        average_runs=average_runs,
+        data_name=data_name,
+    )
+    save_path = save_prediction_results(
+        val_loader=val_loader,
+        model=model,
+        mode="Unet",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        model_name="Unet",
+        dataset_name=data_name,
+    )
+    if save_path:
+        logger.info(f"Prediction results saved to {save_path}")
+
+    return avg_time_per_frame
 
 
 @hydra.main(version_base="1.2", config_path="config", config_name="config")
 def main(cfg: DictConfig):
+    if hasattr(cfg.args, "if_benchmark") and cfg.args.if_benchmark:
+        target_frames = getattr(cfg.args, "target_frames", 100)
+        warmup_runs = getattr(cfg.args, "warmup_runs", 5)
+        average_runs = getattr(cfg.args, "average_runs", 10)
+
+        if cfg.args.model_name == "FNO":
+            logger.info("Running FNO benchmark...")
+            avg_time = run_benchmark_FNO(
+                num_workers=cfg.args.num_workers,
+                modes=cfg.args.modes,
+                width=cfg.args.width,
+                initial_step=cfg.args.initial_step,
+                prediction_step=cfg.args.prediction_step,
+                num_channels=cfg.args.num_channels,
+                batch_size=cfg.args.batch_size,
+                flnm=cfg.args.filename,
+                single_file=cfg.args.single_file,
+                base_path=cfg.args.data_path,
+                model_save_path=cfg.args.model_save_path,
+                reduced_resolution=cfg.args.reduced_resolution,
+                reduced_resolution_t=cfg.args.reduced_resolution_t,
+                reduced_batch=cfg.args.reduced_batch,
+                target_frames=target_frames,
+                warmup_runs=warmup_runs,
+                average_runs=average_runs,
+            )
+            logger.info(
+                f"FNO benchmark completed. Average time per frame: {avg_time:.5f}s"
+            )
+            return
+
+        elif cfg.args.model_name == "Unet":
+            logger.info("Running Unet benchmark...")
+            avg_time = run_benchmark_Unet(
+                num_workers=cfg.args.num_workers,
+                initial_step=cfg.args.initial_step,
+                prediction_step=cfg.args.prediction_step,
+                in_channels=cfg.args.in_channels,
+                out_channels=cfg.args.out_channels,
+                batch_size=cfg.args.batch_size,
+                flnm=cfg.args.filename,
+                single_file=cfg.args.single_file,
+                base_path=cfg.args.data_path,
+                model_save_path=cfg.args.model_save_path,
+                reduced_resolution=cfg.args.reduced_resolution,
+                reduced_resolution_t=cfg.args.reduced_resolution_t,
+                reduced_batch=cfg.args.reduced_batch,
+                training_type=cfg.args.training_type,
+                ar_mode=getattr(cfg.args, "ar_mode", None),
+                pushforward=getattr(cfg.args, "pushforward", None),
+                unroll_step=getattr(cfg.args, "unroll_step", None),
+                target_frames=target_frames,
+                warmup_runs=warmup_runs,
+                average_runs=average_runs,
+            )
+            logger.info(
+                f"Unet benchmark completed. Average time per frame: {avg_time:.5f}s"
+            )
+            return
+
+        else:
+            logger.error(f"Benchmark not supported for model: {cfg.args.model_name}")
+            return
+
     if cfg.args.model_name == "FNO":
         from pdebench.models.fno.train import run_training as run_training_FNO
 
@@ -236,7 +560,6 @@ def main(cfg: DictConfig):
             t_max=cfg.args.t_max,
         )
     elif cfg.args.model_name == "PINN":
-        # not importing globally as DeepXDE changes some global PyTorch settings
         from pdebench.models.pinn.train import run_training as run_training_PINN
 
         logger.info("PINN")

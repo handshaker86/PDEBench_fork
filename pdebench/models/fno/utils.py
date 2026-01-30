@@ -352,11 +352,11 @@ class FNODatasetMult(Dataset):
         with h5py.File(self.file_path, "r") as h5_file:
             data_list = sorted(h5_file.keys())
 
-        test_idx = int(len(data_list) * (1 - test_ratio))
+        test_num = int(len(data_list) * test_ratio)
         if if_test:
-            self.data_list = np.array(data_list[test_idx:])
+            self.data_list = np.array(data_list[-test_num:])
         else:
-            self.data_list = np.array(data_list[:test_idx])
+            self.data_list = np.array(data_list[:-test_num])
 
         # Time steps used as initial conditions
         self.initial_step = initial_step
