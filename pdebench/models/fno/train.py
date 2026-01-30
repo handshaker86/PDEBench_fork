@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 from pathlib import Path
 from timeit import default_timer
@@ -9,13 +10,11 @@ import numpy as np
 import torch
 from pdebench.models.fno.fno import FNO1d, FNO2d, FNO3d
 from pdebench.models.fno.utils import FNODatasetMult, FNODatasetSingle
-from pdebench.models.metrics import metrics
+from pdebench.models.metrics import metrics, save_prediction_results
+from pdebench.models.training_logger import TrainingLogger
 from torch import nn
 
-
 logger = logging.getLogger(__name__)
-# torch.manual_seed(0)
-# np.random.seed(0)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -53,20 +52,14 @@ def run_training(
     result_save_path="results/",
     training_type="autoregressive",
 ):
-    msg = f"Epochs = {epochs}, learning rate = {learning_rate}, scheduler step = {scheduler_step}, scheduler gamma = {scheduler_gamma}"
-    print(msg)
-
-    ################################################################
-    # load data
-    ################################################################
+    print(
+        f"Epochs = {epochs}, lr = {learning_rate}, scheduler step = {scheduler_step}, gamma = {scheduler_gamma}"
+    )
 
     if single_file:
-        # filename
         model_name = flnm[:-5] + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm + "/"
         print("FNODatasetSingle")
-
-        # Initialize the dataset and dataloader
         train_data = FNODatasetSingle(
             flnm,
             reduced_resolution=reduced_resolution,
@@ -85,12 +78,9 @@ def run_training(
             if_test=True,
             saved_folder=base_path,
         )
-
     else:
-        # filename
         model_name = flnm + "_FNO"
         result_save_path = result_save_path + "/FNO/" + flnm + "/"
-
         print("FNODatasetMult")
         train_data = FNODatasetMult(
             flnm,
@@ -117,10 +107,6 @@ def run_training(
     val_loader = torch.utils.data.DataLoader(
         val_data, batch_size=batch_size, num_workers=num_workers, shuffle=False
     )
-
-    ################################################################
-    # training and evaluation
-    ################################################################
 
     _, _data, _ = next(iter(val_loader))
     dimensions = len(_data.shape)
@@ -153,15 +139,12 @@ def run_training(
             prediction_step=prediction_step,
         ).to(device)
 
-    # Set maximum time step of the data to train
     t_train = min(t_train, _data.shape[-2])
-
     model_path = model_save_path + "FNO/" + model_name + ".pt"
     Path(model_save_path + "/FNO/").mkdir(parents=True, exist_ok=True)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    msg = f"Total parameters = {total_params}"
-    print(msg)
+    print(f"Total parameters = {total_params}")
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=1e-4
@@ -172,11 +155,13 @@ def run_training(
 
     loss_fn = nn.MSELoss(reduction="mean")
     loss_val_min = np.inf
-
     start_epoch = 0
 
+    logger_training = TrainingLogger(result_save_path, model_name)
+    logger_training.load_history()
+
     if not if_training:
-        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
         model.eval()
@@ -199,22 +184,32 @@ def run_training(
             initial_step=initial_step,
             prediction_step=prediction_step,
             result_save_path=result_save_path,
+            rollout_plot=True,
         )
         with Path(model_name + ".pickle").open("wb") as pb:
             pickle.dump(errs, pb)
+        data_name = os.path.splitext(flnm)[0] if single_file else flnm
+        save_path = save_prediction_results(
+            val_loader=val_loader,
+            model=model,
+            mode="FNO",
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+            model_name="FNO",
+            dataset_name=data_name,
+        )
+        if save_path:
+            logger.info(f"Prediction results saved to {save_path}")
 
         return
 
-    # If desired, restore the network by loading the weights saved in the .pt
-    # file
     if continue_training:
-        print("Restoring model (that is the network's weights) from file...")
+        print("Restoring model from checkpoint...")
         checkpoint = torch.load(model_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
         model.train()
 
-        # Load optimizer state dict
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         for state in optimizer.state.values():
             for k, v in state.items():
@@ -223,9 +218,11 @@ def run_training(
 
         start_epoch = checkpoint["epoch"]
         loss_val_min = checkpoint["loss"]
+        last_recorded_epoch = logger_training.get_last_epoch()
+        if last_recorded_epoch < start_epoch:
+            start_epoch = max(start_epoch, last_recorded_epoch + 1)
 
-    msg = "start training..."
-    print(msg)
+    print("Start training...")
 
     for ep in range(start_epoch, epochs):
         model.train()
@@ -234,46 +231,24 @@ def run_training(
         train_l2_full = 0
         for xx, yy, grid in train_loader:
             loss = 0
-
-            # xx: input tensor (first few time steps) [b, x1, ..., xd, t_init, v]
-            # yy: target tensor [b, x1, ..., xd, t, v]
-            # grid: meshgrid [b, x1, ..., xd, dims]
             xx = xx.to(device)  # noqa: PLW2901
             yy = yy.to(device)  # noqa: PLW2901
             grid = grid.to(device)  # noqa: PLW2901
-
-            # Initialize the prediction tensor
             pred = yy[..., :initial_step, :]
-            # Extract shape of the input tensor for reshaping (i.e. stacking the
-            # time and channels dimension together)
             inp_shape = list(xx.shape)
             inp_shape = inp_shape[:-2]
             inp_shape.append(-1)
 
             if training_type in ["autoregressive"]:
-                # Autoregressive loop
                 for t in range(
                     initial_step, t_train - prediction_step + 1, prediction_step
                 ):
-                    # Reshape input tensor into [b, x1, ..., xd, t_init*v]
                     inp = xx.reshape(inp_shape)
-
-                    # Extract target at current time step
                     y = yy[..., t : t + prediction_step, :]
-
-                    # Model run
-                    im = model(inp, grid)  # im [b, ..., prediction_step, v]
-
-                    # Loss calculation
+                    im = model(inp, grid)
                     _batch = im.size(0)
                     loss += loss_fn(im.reshape(_batch, -1), y.reshape(_batch, -1))
-
-                    # Concatenate the prediction at current time step into the
-                    # prediction tensor
                     pred = torch.cat((pred, im), -2)
-
-                    # Concatenate the prediction at the current time step to be used
-                    # as input for the next time step
                     xx = torch.cat(
                         (xx[..., prediction_step:, :], im), dim=-2
                     )  # noqa: PLW2901
@@ -375,14 +350,43 @@ def run_training(
                     )
 
         t2 = default_timer()
+        epoch_time = t2 - t1
         scheduler.step()
-        print(
-            "epoch: {0}, loss: {1:.5f}, t2-t1: {2:.5f}, trainL2: {3:.5f}, testL2: {4:.5f}".format(
-                ep, loss.item(), t2 - t1, train_l2_full, val_l2_full
-            )
+
+        val_l2_step_for_log = val_l2_step if ep % model_update == 0 else None
+        val_l2_full_for_log = val_l2_full if ep % model_update == 0 else None
+        logger_training.record(
+            epoch=ep,
+            train_loss_step=train_l2_step,
+            train_loss_full=train_l2_full,
+            val_loss_step=val_l2_step_for_log,
+            val_loss_full=val_l2_full_for_log,
+            epoch_time=epoch_time,
         )
+        logger_training.save()
+
+        ckpt_path = Path(model_save_path) / "FNO" / f"ckpt-{ep}.pt"
+        torch.save(
+            {
+                "epoch": ep,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": loss_val_min,
+            },
+            ckpt_path,
+        )
+        if ep % 10 == 0:
+            logger_training.plot_loss_curves(save_plot=True)
+        print(
+            f"epoch: {ep}, loss: {loss.item():.5f}, t2-t1: {t2 - t1:.5f}, "
+            f"trainL2: {train_l2_full:.5f}, testL2: {val_l2_full:.5f}"
+        )
+
+    logger_training.plot_loss_curves(save_plot=True)
+    logger.info(
+        f"Training done, loss history saved to {logger_training.loss_history_file}"
+    )
 
 
 if __name__ == "__main__":
     run_training()
-    # print("Done.")
