@@ -416,6 +416,155 @@ def run_benchmark_Unet(
     return avg_time_per_frame
 
 
+def run_benchmark_Transolver(
+    num_workers,
+    n_hidden,
+    n_layers,
+    n_head,
+    slice_num,
+    mlp_ratio,
+    initial_step,
+    prediction_step,
+    num_channels,
+    batch_size,
+    flnm,
+    single_file,
+    base_path,
+    model_save_path,
+    reduced_resolution,
+    reduced_resolution_t,
+    reduced_batch,
+    target_frames=100,
+    warmup_runs=5,
+    average_runs=10,
+    dropout=0.0,
+    act="gelu",
+    kernel=3,
+):
+    """Load Transolver model and run predict_time_benchmark."""
+    from pdebench.models.fno.utils import FNODatasetMult, FNODatasetSingle
+    from pdebench.models.transolver.transolver import (
+        Transolver1d,
+        Transolver2d,
+        Transolver3d,
+    )
+
+    if single_file:
+        model_name = flnm[:-5] + "_Transolver"
+        val_data = FNODatasetSingle(
+            flnm,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            initial_step=initial_step,
+            if_test=True,
+            saved_folder=base_path,
+        )
+    else:
+        model_name = flnm + "_Transolver"
+        val_data = FNODatasetMult(
+            flnm,
+            initial_step=initial_step,
+            saved_folder=base_path,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            reduced_batch=reduced_batch,
+            if_test=True,
+        )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_data, batch_size=batch_size, num_workers=num_workers, shuffle=False
+    )
+
+    _, _data, _ = next(iter(val_loader))
+    dimensions = len(_data.shape)
+    if dimensions == 4:
+        model = Transolver1d(
+            num_channels=num_channels,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            n_head=n_head,
+            slice_num=slice_num,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+            act=act,
+        ).to(device)
+    elif dimensions == 5:
+        H, W = _data.shape[1], _data.shape[2]
+        model = Transolver2d(
+            num_channels=num_channels,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            n_head=n_head,
+            slice_num=slice_num,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+            act=act,
+            kernel=kernel,
+            H=H,
+            W=W,
+        ).to(device)
+    elif dimensions == 6:
+        H, W, D = _data.shape[1], _data.shape[2], _data.shape[3]
+        model = Transolver3d(
+            num_channels=num_channels,
+            initial_step=initial_step,
+            prediction_step=prediction_step,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            n_head=n_head,
+            slice_num=slice_num,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+            act=act,
+            kernel=kernel,
+            H=H,
+            W=W,
+            D=D,
+        ).to(device)
+
+    model_path = Path(model_save_path) / "Transolver" / f"{model_name}.pt"
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {model_path}\n"
+            f"Please check if the model has been trained and saved at this path."
+        )
+    checkpoint = torch.load(str(model_path), map_location=device, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    data_name = os.path.splitext(flnm)[0]
+    avg_time_per_frame = predict_time_benchmark(
+        val_loader=val_loader,
+        model=model,
+        mode="FNO",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        target_frames=target_frames,
+        warmup_runs=warmup_runs,
+        average_runs=average_runs,
+        data_name=data_name,
+    )
+    save_path = save_prediction_results(
+        val_loader=val_loader,
+        model=model,
+        mode="FNO",
+        initial_step=initial_step,
+        prediction_step=prediction_step,
+        model_name="Transolver",
+        dataset_name=data_name,
+    )
+    if save_path:
+        logger.info(f"Prediction results saved to {save_path}")
+
+    return avg_time_per_frame
+
+
 @hydra.main(version_base="1.2", config_path="config", config_name="config")
 def main(cfg: DictConfig):
     if hasattr(cfg.args, "if_benchmark") and cfg.args.if_benchmark:
@@ -475,6 +624,38 @@ def main(cfg: DictConfig):
             )
             logger.info(
                 f"Unet benchmark completed. Average time per frame: {avg_time:.5f}s"
+            )
+            return
+
+        elif cfg.args.model_name == "Transolver":
+            logger.info("Running Transolver benchmark...")
+            avg_time = run_benchmark_Transolver(
+                num_workers=cfg.args.num_workers,
+                n_hidden=cfg.args.n_hidden,
+                n_layers=cfg.args.n_layers,
+                n_head=cfg.args.n_head,
+                slice_num=cfg.args.slice_num,
+                mlp_ratio=cfg.args.mlp_ratio,
+                initial_step=cfg.args.initial_step,
+                prediction_step=getattr(cfg.args, "prediction_step", 1),
+                num_channels=cfg.args.num_channels,
+                batch_size=cfg.args.batch_size,
+                flnm=cfg.args.filename,
+                single_file=cfg.args.single_file,
+                base_path=cfg.args.data_path,
+                model_save_path=cfg.args.model_save_path,
+                reduced_resolution=cfg.args.reduced_resolution,
+                reduced_resolution_t=cfg.args.reduced_resolution_t,
+                reduced_batch=cfg.args.reduced_batch,
+                target_frames=target_frames,
+                warmup_runs=warmup_runs,
+                average_runs=average_runs,
+                dropout=getattr(cfg.args, "dropout", 0.0),
+                act=getattr(cfg.args, "act", "gelu"),
+                kernel=getattr(cfg.args, "kernel", 3),
+            )
+            logger.info(
+                f"Transolver benchmark completed. Average time per frame: {avg_time:.5f}s"
             )
             return
 
@@ -576,6 +757,52 @@ def main(cfg: DictConfig):
             val_num=cfg.args.val_num,
             if_periodic_bc=cfg.args.if_periodic_bc,
             aux_params=cfg.args.aux_params,
+        )
+    elif cfg.args.model_name == "Transolver":
+        from pdebench.models.transolver.train import (
+            run_training as run_training_Transolver,
+        )
+
+        logger.info("Transolver")
+        run_training_Transolver(
+            if_training=cfg.args.if_training,
+            continue_training=cfg.args.continue_training,
+            num_workers=cfg.args.num_workers,
+            n_hidden=cfg.args.n_hidden,
+            n_layers=cfg.args.n_layers,
+            n_head=cfg.args.n_head,
+            slice_num=cfg.args.slice_num,
+            mlp_ratio=cfg.args.mlp_ratio,
+            initial_step=cfg.args.initial_step,
+            prediction_step=getattr(cfg.args, "prediction_step", 1),
+            t_train=cfg.args.t_train,
+            training_type=cfg.args.training_type,
+            num_channels=cfg.args.num_channels,
+            batch_size=cfg.args.batch_size,
+            epochs=cfg.args.epochs,
+            learning_rate=cfg.args.learning_rate,
+            scheduler_step=cfg.args.scheduler_step,
+            scheduler_gamma=cfg.args.scheduler_gamma,
+            model_update=cfg.args.model_update,
+            flnm=cfg.args.filename,
+            single_file=cfg.args.single_file,
+            base_path=cfg.args.data_path,
+            model_save_path=cfg.args.model_save_path,
+            result_save_path=cfg.args.result_save_path,
+            reduced_resolution=cfg.args.reduced_resolution,
+            reduced_resolution_t=cfg.args.reduced_resolution_t,
+            reduced_batch=cfg.args.reduced_batch,
+            plot=cfg.args.plot,
+            channel_plot=cfg.args.channel_plot,
+            x_min=cfg.args.x_min,
+            x_max=cfg.args.x_max,
+            y_min=cfg.args.y_min,
+            y_max=cfg.args.y_max,
+            t_min=cfg.args.t_min,
+            t_max=cfg.args.t_max,
+            dropout=getattr(cfg.args, "dropout", 0.0),
+            act=getattr(cfg.args, "act", "gelu"),
+            kernel=getattr(cfg.args, "kernel", 3),
         )
 
 
