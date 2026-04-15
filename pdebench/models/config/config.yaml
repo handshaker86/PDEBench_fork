@@ -36,10 +36,20 @@ args:
   ar_mode: True
   pushforward: True
   unroll_step: 20
+  prediction_step: 1
   #FNO
   num_channels: 4
   modes: 12
   width: 20
+  #Transolver
+  n_hidden: 256
+  n_layers: 5
+  n_head: 8
+  slice_num: 32
+  mlp_ratio: 1
+  dropout: 0.0
+  act: gelu
+  kernel: 3
   #Inverse
   base_path: ../data/
   training_type: autoregressive
