@@ -455,6 +455,33 @@ def _reinit_orthogonal_slice(model):
             torch.nn.init.orthogonal_(m.in_project_slice.weight)
 
 
+def _flatten_grid(grid, batch_size, spatial_shape, space_dim):
+    """Accept either a shared grid or a DataLoader-batched grid."""
+    expected_unbatched_dims = len(spatial_shape) + 1
+    expected_batched_dims = expected_unbatched_dims + 1
+
+    if grid.dim() == expected_unbatched_dims:
+        grid = grid.unsqueeze(0).expand(batch_size, *grid.shape)
+    elif grid.dim() == expected_batched_dims:
+        if grid.shape[0] != batch_size:
+            raise ValueError(
+                f"Grid batch size {grid.shape[0]} does not match input batch size {batch_size}."
+            )
+    else:
+        raise ValueError(
+            f"Expected grid with {expected_unbatched_dims} or {expected_batched_dims} dims, "
+            f"got shape {tuple(grid.shape)}."
+        )
+
+    expected_shape = tuple(spatial_shape) + (space_dim,)
+    if tuple(grid.shape[1:]) != expected_shape:
+        raise ValueError(
+            f"Expected grid shape {expected_shape} after batching, got {tuple(grid.shape[1:])}."
+        )
+
+    return grid.reshape(batch_size, -1, space_dim)
+
+
 # ---------------------------------------------------------------------------
 # PDEBench-compatible Transolver models
 # ---------------------------------------------------------------------------
@@ -512,9 +539,9 @@ class Transolver1d(nn.Module):
 
     def forward(self, x, grid):
         # x: [B, L, initial_step * num_channels]
-        # grid: [L, 1]
+        # grid: [L, 1] or [B, L, 1]
         B, L, _ = x.shape
-        grid_expanded = grid.unsqueeze(0).expand(B, -1, -1)  # [B, L, 1]
+        grid_expanded = _flatten_grid(grid, B, (L,), 1)  # [B, L, 1]
 
         fx = torch.cat([x, grid_expanded], dim=-1)  # [B, L, fun_dim + 1]
         fx = self.preprocess(fx)
@@ -587,12 +614,12 @@ class Transolver2d(nn.Module):
 
     def forward(self, x, grid):
         # x: [B, Lx, Ly, initial_step * num_channels]
-        # grid: [Lx, Ly, 2]
+        # grid: [Lx, Ly, 2] or [B, Lx, Ly, 2]
         B, Lx, Ly, _ = x.shape
         N = Lx * Ly
 
         x_flat = x.reshape(B, N, -1)  # [B, N, fun_dim]
-        grid_flat = grid.reshape(1, N, -1).expand(B, -1, -1)  # [B, N, 2]
+        grid_flat = _flatten_grid(grid, B, (Lx, Ly), 2)  # [B, N, 2]
 
         fx = torch.cat([x_flat, grid_flat], dim=-1)  # [B, N, fun_dim + 2]
         fx = self.preprocess(fx)
@@ -668,12 +695,12 @@ class Transolver3d(nn.Module):
 
     def forward(self, x, grid):
         # x: [B, Lx, Ly, Lz, initial_step * num_channels]
-        # grid: [Lx, Ly, Lz, 3]
+        # grid: [Lx, Ly, Lz, 3] or [B, Lx, Ly, Lz, 3]
         B, Lx, Ly, Lz, _ = x.shape
         N = Lx * Ly * Lz
 
         x_flat = x.reshape(B, N, -1)  # [B, N, fun_dim]
-        grid_flat = grid.reshape(1, N, -1).expand(B, -1, -1)  # [B, N, 3]
+        grid_flat = _flatten_grid(grid, B, (Lx, Ly, Lz), 3)  # [B, N, 3]
 
         fx = torch.cat([x_flat, grid_flat], dim=-1)  # [B, N, fun_dim + 3]
         fx = self.preprocess(fx)

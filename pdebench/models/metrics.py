@@ -344,7 +344,7 @@ def metrics(
 
             total_time = sum(all_total_times) / len(all_total_times)
 
-    elif mode == "FNO":
+    elif mode in {"FNO", "Transolver"}:
         with torch.no_grad():
             print("Warming up GPU...")
             for _ in range(warmup_runs):
@@ -808,7 +808,7 @@ def save_prediction_results(
                     pred[..., initial_step:pred_length, :].detach().cpu().numpy()
                 )
 
-    elif mode == "FNO":
+    elif mode in {"FNO", "Transolver"}:
         with torch.no_grad():
             for itot, (xx, yy, grid) in enumerate(val_loader):
                 xx = xx.to(device)
@@ -996,7 +996,7 @@ def predict_time_benchmark(
 
                 all_times.append(total_time)
 
-    elif mode == "FNO":
+    elif mode in {"FNO", "Transolver"}:
         with torch.no_grad():
             print("Warming up GPU...")
             for _ in range(warmup_runs):

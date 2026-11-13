@@ -542,7 +542,7 @@ def run_benchmark_Transolver(
     avg_time_per_frame = predict_time_benchmark(
         val_loader=val_loader,
         model=model,
-        mode="FNO",
+        mode="Transolver",
         initial_step=initial_step,
         prediction_step=prediction_step,
         target_frames=target_frames,
@@ -553,7 +553,7 @@ def run_benchmark_Transolver(
     save_path = save_prediction_results(
         val_loader=val_loader,
         model=model,
-        mode="FNO",
+        mode="Transolver",
         initial_step=initial_step,
         prediction_step=prediction_step,
         model_name="Transolver",
